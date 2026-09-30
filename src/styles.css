@@ -5,6 +5,29 @@
 
 @layer base {
   html {
-    font-family: "Inter Variable", sans-serif;
+    font-family: "SF Compact", sans-serif;
   }
+
+  html,
+  body {
+    height: 100%;
+    overscroll-behavior: none;
+  }
+}
+
+/* Markdown inside chat bubbles: tighter than Streamdown's document defaults. */
+.bubble-prose > *:first-child {
+  margin-top: 0;
+}
+
+.bubble-prose > *:last-child {
+  margin-bottom: 0;
+}
+
+/*
+ * Kumo's primary button, recoloured to ink for chat actions (send, take over).
+ * Button derives its fill, gradient and ring from the brand colour inline.
+ */
+.btn-ink {
+  --color-kumo-brand: var(--color-kumo-contrast);
 }

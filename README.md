@@ -1,104 +1,100 @@
-# TanStack Start + Cloudflare Workers Template
+# bdots
 
-A minimal, agent-first starter for building full-stack apps on Cloudflare
-Workers with TanStack Start and the [`cf` CLI](https://developers.cloudflare.com/cf/).
+AI teammates with their own computer and browser, built on Cloudflare. The
+full spec is in [`product.md`](./product.md).
+
+You create several bots (Chief, Sales Outbound, Inbox Manager…). Each one is
+its own Durable Object with its own chat history, memory, routines, a durable
+file system with a shell, and a browser it can hand to you when it needs a
+login.
 
 > [!NOTE]
-> This is a highly opinionated starter kit made specifically for coding
-> agents (Claude Code, opencode, Codex, …). `cf` and the Cloudflare Vite
-> plugin 2.0 are both in beta, so expect things to move.
+> `@cloudflare/computer`, `@cloudflare/think`, the `cf` CLI and the Cloudflare
+> Vite plugin 2.0 are all preview or beta. Expect things to move.
 
-**Includes:**
+## What works today
 
-- TanStack Start on Vite, deployed as a Cloudflare Worker
-- `cloudflare.config.ts` — typed config for the `cf` CLI (no `wrangler.jsonc`)
-- **Zero bindings by default** — no database or bucket is created until a
-  project asks for one
-- Drizzle ORM + Drizzle Kit + drizzle-zod installed, ready for D1
-- Example **server function** (`/`) — typed RPC for UI data
-- Example **API route** (`/api/hello`) — GET + POST with Zod validation
-- Tailwind v4 + Kumo (`@cloudflare/kumo`) + Phosphor icons
-- An `AGENTS.md` and skills that teach agents the patterns they get wrong
+- Multiple bots per user, with a live sidebar (status, preview, unread)
+- Chat with streaming, resumable turns and a bot that names itself from its
+  first task
+- A computer per bot: files under `/workspace` plus a shell that runs in a
+  Dynamic Worker (no container)
+- Browser tools: stateless page reads, and a persistent Chromium session
+  with Live View
+- Hand-off: the bot asks you to sign in, you take over its browser, then it
+  continues in the same session
+- Rules per bot (allow / ask first / block) with approval cards in the thread
+- Routines (cron or one-off), memory the bot maintains, bot-to-bot messages
+- Connections: add an [Executor](https://executor.sh) gateway or any MCP
+  server, and choose which bots may use it
+
+Not built yet: Jev classification, inbound email and webhooks, Kitesurf,
+the container backend, R2 screenshots, group threads, login vault.
 
 ## Setup
 
 ```bash
-npm i -g cf      # once per machine
+npm i -g cf          # once per machine
 pnpm install
-pnpm dev         # http://localhost:3000
+npx wrangler login   # once: the dev server needs it for Workers AI and Browser Run
+pnpm dev             # http://localhost:3000
 ```
 
-Nothing needs to be created on Cloudflare to run locally. To deploy:
+Workers AI and Browser Run have no local simulator, so `pnpm dev` talks to
+your Cloudflare account for those two bindings. Everything else (Durable
+Objects, the bots' files and shell) runs locally under `.cloudflare/state/`.
+
+If your login can see more than one account, pick one:
 
 ```bash
-cf auth login    # once
+CLOUDFLARE_ACCOUNT_ID=<id> pnpm dev
+```
+
+To deploy:
+
+```bash
+cf auth login        # once
 pnpm run deploy
 ```
 
-Before the first deploy of a real project, rename `worker.name` in
-`cloudflare.config.ts` and `name` in `package.json`.
+Without Cloudflare Access in front of the Worker, every visitor is the same
+`demo` user. Put it behind Access before sharing a deployment. See
+`src/lib/auth.ts`.
 
-## Adding a database, storage, or other bindings
+## Configuration
 
-The template ships without bindings on purpose. Ask your agent:
+Set in `cloudflare.config.ts`:
 
-> add a D1 database with a `posts` table
-
-> add an R2 bucket for file uploads
-
-`AGENTS.md` and the skills in `.agents/skills/` give it the exact steps:
-create the resource with `cf`, declare it in `cloudflare.config.ts`, set up
-Drizzle, generate and apply migrations.
+| Variable        | Purpose                                                                                                 |
+| --------------- | ------------------------------------------------------------------------------------------------------- |
+| `MODEL`         | Chat model. A `@cf/...` id uses Workers AI; a `<provider>/<model>` slug is routed through AI Gateway.     |
+| `AI_GATEWAY_ID` | Optional. When set, Workers AI calls also go through that AI Gateway (logs, caching, spend limits).       |
 
 ## Scripts
 
-| script        | what it does                                              |
-| ------------- | --------------------------------------------------------- |
-| `dev`         | `cf dev` — Vite dev server on workerd, port 3000           |
-| `build`       | `cf build` — production build into `.cloudflare/output/`   |
-| `deploy`      | `cf deploy` — build, upload and deploy (`pnpm run deploy`) |
-| `typecheck`   | Regenerate binding types, then `tsc`                       |
-| `cf-typegen`  | `cf workers types` → `.cloudflare/types/index.d.ts`        |
-| `db:generate` | Generate SQL migrations from `src/db/schema.ts`            |
-| `format`      | Prettier                                                   |
+| script      | what it does                                               |
+| ----------- | ---------------------------------------------------------- |
+| `dev`       | `cf dev` — Vite dev server on workerd, port 3000           |
+| `build`     | `cf build` — production build into `.cloudflare/output/`   |
+| `deploy`    | `cf deploy` — build, upload and deploy (`pnpm run deploy`) |
+| `typecheck` | Regenerate binding types, then `tsc`                       |
+| `format`    | Prettier                                                   |
 
 ## Project layout
 
 ```
 src/
+  server.ts              # Worker entry: routes /agents/*, exports the Durable Objects
+  agents/
+    user-hub.ts          # one per user: bot directory, connections, bot-to-bot relay
+    bot-agent.ts         # one per bot: Think agent, tools, rules, routines, computer, browser
+    prompt.ts            # system prompt
   routes/
-    __root.tsx
-    index.tsx          # server function example
-    api/
-      hello.ts         # API route (GET + POST)
-cloudflare.config.ts   # Worker config + bindings (read by cf)
-vite.config.ts         # plugins, dev port, source maps
-drizzle.config.ts      # drizzle-kit config (used once a DB is added)
-AGENTS.md              # read this if you're an AI agent
-.agents/skills/        # step-by-step recipes for agents
+    _app.tsx             # sidebar layout
+    _app/bots.$botId.tsx # thread, with computer and settings side panels
+    _app/connections.tsx
+  components/            # thread, Computer card, take-over dialog, panels
+  lib/                   # shared types, server functions, contexts
+cloudflare.config.ts     # Worker config + bindings (read by cf)
+AGENTS.md                # read this if you're an AI agent
 ```
-
-## Cloudflare docs for agents
-
-`AGENTS.md` tells agents to look Cloudflare things up rather than guess:
-first through the [Cloudflare Docs MCP server](https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/)
-if it is installed, otherwise by fetching Markdown from
-`https://developers.cloudflare.com/`. To install the MCP server:
-
-```json
-{
-  "mcpServers": {
-    "cloudflare-docs": {
-      "url": "https://docs.mcp.cloudflare.com/mcp"
-    }
-  }
-}
-```
-
-## Why AGENTS.md?
-
-TanStack Start, the Workers Vite plugin and the `cf` CLI all moved faster
-than LLM training data. Without guidance, agents generate old APIs like
-`createServerFileRoute`, mount a Hono app inside the Worker entry, write a
-`wrangler.jsonc`, or pass `env` around as a parameter. `AGENTS.md` documents
-what currently works so an agent gets the right pattern on the first try.

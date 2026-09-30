@@ -9,54 +9,130 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppRouteImport } from './routes/_app'
+import { Route as AppIndexRouteImport } from './routes/_app/index'
+import { Route as AppConnectionsRouteImport } from './routes/_app/connections'
 import { Route as ApiHelloRouteImport } from './routes/api/hello'
+import { Route as AppBotsBotIdRouteImport } from './routes/_app/bots.$botId'
+import { Route as AppBotsBotIdComputerRouteImport } from './routes/_app/bots.$botId.computer'
+import { Route as AppBotsBotIdSettingsRouteImport } from './routes/_app/bots.$botId.settings'
 
-const IndexRoute = IndexRouteImport.update({
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AppRoute,
+} as any)
+const AppConnectionsRoute = AppConnectionsRouteImport.update({
+  id: '/connections',
+  path: '/connections',
+  getParentRoute: () => AppRoute,
 } as any)
 const ApiHelloRoute = ApiHelloRouteImport.update({
   id: '/api/hello',
   path: '/api/hello',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppBotsBotIdRoute = AppBotsBotIdRouteImport.update({
+  id: '/bots/$botId',
+  path: '/bots/$botId',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBotsBotIdComputerRoute = AppBotsBotIdComputerRouteImport.update({
+  id: '/computer',
+  path: '/computer',
+  getParentRoute: () => AppBotsBotIdRoute,
+} as any)
+const AppBotsBotIdSettingsRoute = AppBotsBotIdSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppBotsBotIdRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
+  '/': typeof AppIndexRoute
+  '/connections': typeof AppConnectionsRoute
   '/api/hello': typeof ApiHelloRoute
+  '/bots/$botId': typeof AppBotsBotIdRouteWithChildren
+  '/bots/$botId/computer': typeof AppBotsBotIdComputerRoute
+  '/bots/$botId/settings': typeof AppBotsBotIdSettingsRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
+  '/connections': typeof AppConnectionsRoute
   '/api/hello': typeof ApiHelloRoute
+  '/': typeof AppIndexRoute
+  '/bots/$botId': typeof AppBotsBotIdRouteWithChildren
+  '/bots/$botId/computer': typeof AppBotsBotIdComputerRoute
+  '/bots/$botId/settings': typeof AppBotsBotIdSettingsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
+  '/_app': typeof AppRouteWithChildren
+  '/_app/connections': typeof AppConnectionsRoute
   '/api/hello': typeof ApiHelloRoute
+  '/_app/': typeof AppIndexRoute
+  '/_app/bots/$botId': typeof AppBotsBotIdRouteWithChildren
+  '/_app/bots/$botId/computer': typeof AppBotsBotIdComputerRoute
+  '/_app/bots/$botId/settings': typeof AppBotsBotIdSettingsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/hello'
+  fullPaths:
+    | '/'
+    | '/connections'
+    | '/api/hello'
+    | '/bots/$botId'
+    | '/bots/$botId/computer'
+    | '/bots/$botId/settings'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/hello'
-  id: '__root__' | '/' | '/api/hello'
+  to:
+    | '/connections'
+    | '/api/hello'
+    | '/'
+    | '/bots/$botId'
+    | '/bots/$botId/computer'
+    | '/bots/$botId/settings'
+  id:
+    | '__root__'
+    | '/_app'
+    | '/_app/connections'
+    | '/api/hello'
+    | '/_app/'
+    | '/_app/bots/$botId'
+    | '/_app/bots/$botId/computer'
+    | '/_app/bots/$botId/settings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
+  AppRoute: typeof AppRouteWithChildren
   ApiHelloRoute: typeof ApiHelloRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/': {
+      id: '/_app/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/connections': {
+      id: '/_app/connections'
+      path: '/connections'
+      fullPath: '/connections'
+      preLoaderRoute: typeof AppConnectionsRouteImport
+      parentRoute: typeof AppRoute
     }
     '/api/hello': {
       id: '/api/hello'
@@ -65,11 +141,60 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiHelloRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/bots/$botId': {
+      id: '/_app/bots/$botId'
+      path: '/bots/$botId'
+      fullPath: '/bots/$botId'
+      preLoaderRoute: typeof AppBotsBotIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/bots/$botId/computer': {
+      id: '/_app/bots/$botId/computer'
+      path: '/computer'
+      fullPath: '/bots/$botId/computer'
+      preLoaderRoute: typeof AppBotsBotIdComputerRouteImport
+      parentRoute: typeof AppBotsBotIdRoute
+    }
+    '/_app/bots/$botId/settings': {
+      id: '/_app/bots/$botId/settings'
+      path: '/settings'
+      fullPath: '/bots/$botId/settings'
+      preLoaderRoute: typeof AppBotsBotIdSettingsRouteImport
+      parentRoute: typeof AppBotsBotIdRoute
+    }
   }
 }
 
+interface AppBotsBotIdRouteChildren {
+  AppBotsBotIdComputerRoute: typeof AppBotsBotIdComputerRoute
+  AppBotsBotIdSettingsRoute: typeof AppBotsBotIdSettingsRoute
+}
+
+const AppBotsBotIdRouteChildren: AppBotsBotIdRouteChildren = {
+  AppBotsBotIdComputerRoute: AppBotsBotIdComputerRoute,
+  AppBotsBotIdSettingsRoute: AppBotsBotIdSettingsRoute,
+}
+
+const AppBotsBotIdRouteWithChildren = AppBotsBotIdRoute._addFileChildren(
+  AppBotsBotIdRouteChildren,
+)
+
+interface AppRouteChildren {
+  AppConnectionsRoute: typeof AppConnectionsRoute
+  AppIndexRoute: typeof AppIndexRoute
+  AppBotsBotIdRoute: typeof AppBotsBotIdRouteWithChildren
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppConnectionsRoute: AppConnectionsRoute,
+  AppIndexRoute: AppIndexRoute,
+  AppBotsBotIdRoute: AppBotsBotIdRouteWithChildren,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
+  AppRoute: AppRouteWithChildren,
   ApiHelloRoute: ApiHelloRoute,
 }
 export const routeTree = rootRouteImport
