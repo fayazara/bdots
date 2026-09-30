@@ -1,0 +1,6 @@
+# Copy to .dev.vars and fill in. Loaded by `cf dev` in local dev only.
+# Declare each secret in cloudflare.config.ts with `bindings.secret()`.
+# For production, upload values with: cf deploy --secrets-file <PATH>
+# Bindings (D1, KV, R2, etc.) go in cloudflare.config.ts, NOT here.
+
+# MY_SECRET="example"
