@@ -155,7 +155,9 @@ export function ComputerCard({
       </div>
       <p className="mt-1 text-[15px] text-kumo-default">{instructions}</p>
 
-      {showPreview ? (
+      {/* A finished card only keeps its preview while the browser is still
+          open; otherwise it collapses to its header. */}
+      {showPreview && (status !== "done" || tab) ? (
         <div className="mt-4 overflow-hidden rounded-2xl border border-kumo-line bg-kumo-recessed">
           {tab ? (
             <LiveViewFrame tab={tab} className="aspect-[16/10]" />

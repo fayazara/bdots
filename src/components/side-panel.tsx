@@ -15,10 +15,7 @@ export function SidePanel({
 }) {
   const { botId } = useBot()
   return (
-    <aside
-      aria-label={title}
-      className="flex w-[44%] max-w-[760px] min-w-[400px] shrink-0 flex-col"
-    >
+    <aside aria-label={title} className="flex h-full flex-col">
       <div className="flex h-14 shrink-0 items-center justify-between px-5">
         <h2 className="text-[15px] font-medium text-kumo-default">{title}</h2>
         <Link

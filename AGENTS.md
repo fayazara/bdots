@@ -10,16 +10,16 @@ TanStack Start, for Workers, and especially for the `cf` CLI.
 bdots is a multi-bot "AI teammates" app (spec: `product.md`). Each bot is a
 Durable Object with its own chat, memory, routines, computer and browser.
 
-| Piece | Where | Notes |
-| --- | --- | --- |
-| Worker entry | `src/server.ts` | Auth-checks and routes `/agents/*`, then hands off to TanStack Start. Exports the Durable Object classes. |
-| `UserHub` | `src/agents/user-hub.ts` | One per user. Bot directory (sidebar), connections, bot-to-bot relay. |
-| `BotAgent` | `src/agents/bot-agent.ts` | One per bot (`<userId>:<botId>`). Extends `Think`. Tools, rules, routines, MCP, computer, browser. |
-| System prompt | `src/agents/prompt.ts` | Stable "soul" plus per-turn context. |
-| Shared types | `src/lib/types.ts` | Imported by both the agents and the client. No server-only imports. |
-| First paint | `src/lib/server-fns.ts` | Server functions that read a snapshot over DO RPC. |
-| Live state | `src/lib/hub-context.tsx`, `src/routes/_app/bots.$botId.tsx` | `useAgent` / `useAgentChat`, browser only, inside `ClientOnly`. |
-| Thread UI | `src/components/thread.tsx`, `computer-card.tsx`, `src/lib/message-parts.ts` | Tool parts become Computer cards, step lists, approval cards and system events. |
+| Piece         | Where                                                                        | Notes                                                                                                                                                               |
+| ------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Worker entry  | `src/server.ts`                                                              | Auth-checks and routes `/agents/*`, then hands off to TanStack Start. Exports the Durable Object classes.                                                           |
+| `UserHub`     | `src/agents/user-hub.ts`                                                     | One per user. Bot directory (sidebar), bot-to-bot relay, and every MCP connection (one sign-in per user; bots call tools through `appCatalog()` / `callAppTool()`). |
+| `BotAgent`    | `src/agents/bot-agent.ts`                                                    | One per bot (`<userId>:<botId>`). Extends `Think`. Tools, rules, routines, computer, browser. Holds no MCP connections of its own.                                  |
+| System prompt | `src/agents/prompt.ts`                                                       | Stable "soul" plus per-turn context.                                                                                                                                |
+| Shared types  | `src/lib/types.ts`                                                           | Imported by both the agents and the client. No server-only imports.                                                                                                 |
+| First paint   | `src/lib/server-fns.ts`                                                      | Server functions that read a snapshot over DO RPC.                                                                                                                  |
+| Live state    | `src/lib/hub-context.tsx`, `src/routes/_app/bots.$botId.tsx`                 | `useAgent` / `useAgentChat`, browser only, inside `ClientOnly`.                                                                                                     |
+| Thread UI     | `src/components/thread.tsx`, `computer-card.tsx`, `src/lib/message-parts.ts` | Tool parts become Computer cards, step lists, approval cards and system events.                                                                                     |
 
 Things that will bite you:
 

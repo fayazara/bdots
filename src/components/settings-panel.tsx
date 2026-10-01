@@ -6,9 +6,9 @@ import { Dialog } from "@cloudflare/kumo/components/dialog"
 import { Input, InputArea } from "@cloudflare/kumo/components/input"
 import { Loader } from "@cloudflare/kumo/components/loader"
 import { Select } from "@cloudflare/kumo/components/select"
-import { Switch } from "@cloudflare/kumo/components/switch"
 import { ClockIcon, TrashIcon } from "@phosphor-icons/react"
 import { useBot } from "@/lib/bot-context"
+import { connectionStatus } from "@/lib/connection-status"
 import { useHub } from "@/lib/hub-context"
 import { ACTION_CLASSES } from "@/lib/types"
 import type { ActionClass, RulePolicy } from "@/lib/types"
@@ -83,6 +83,7 @@ function Identity() {
       />
       <Button
         variant="primary"
+        className="btn-ink"
         disabled={!dirty || !agent || !name.trim()}
         loading={saving}
         onClick={() => void save()}
@@ -130,22 +131,11 @@ function Rules() {
 }
 
 function Toolkit() {
-  const { botId, state } = useBot()
   const hub = useHub()
-  const summary = hub.state.bots.find((b) => b.id === botId)
-  const enabled = new Set(summary?.connectionIds ?? [])
-
-  function toggle(connectionId: string) {
-    const next = new Set(enabled)
-    if (next.has(connectionId)) next.delete(connectionId)
-    else next.add(connectionId)
-    void hub.setBotConnections(botId, [...next])
-  }
-
   return (
     <Section
       title="Connected apps"
-      hint="The connections this bot can use. It reaches apps through their APIs first and only opens a browser when there is no API."
+      hint="Every bot can use all of your connections. Bots reach apps through their APIs first and only open a browser when there is no API."
     >
       {hub.state.connections.length === 0 ? (
         <p className="text-sm text-kumo-subtle">
@@ -155,49 +145,31 @@ function Toolkit() {
           </Link>
         </p>
       ) : (
-        <ul className="space-y-3">
-          {hub.state.connections.map((connection) => {
-            const app = state.apps.find((a) => a.connectionId === connection.id)
-            return (
-              <li
-                key={connection.id}
-                className="flex items-center justify-between gap-3"
+        <ul className="space-y-2">
+          {hub.state.connections.map((connection) => (
+            <li
+              key={connection.id}
+              className="flex items-center justify-between gap-3"
+            >
+              <span className="truncate text-sm text-kumo-default">
+                {connection.name}
+              </span>
+              <span
+                className={`shrink-0 text-xs ${
+                  connection.status === "ready"
+                    ? "text-kumo-subtle"
+                    : "text-kumo-warning"
+                }`}
               >
-                <div className="min-w-0">
-                  <p className="truncate text-sm text-kumo-default">
-                    {connection.name}
-                  </p>
-                  <p className="truncate text-xs text-kumo-subtle">
-                    {app
-                      ? app.state === "ready"
-                        ? `${app.tools} tools`
-                        : (app.error ?? app.state)
-                      : "Off for this bot"}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {app?.authUrl && app.state === "authenticating" ? (
-                    <a
-                      href={app.authUrl}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="text-sm text-kumo-link underline"
-                    >
-                      Authorize
-                    </a>
-                  ) : null}
-                  <Switch
-                    aria-label={`Let this bot use ${connection.name}`}
-                    checked={enabled.has(connection.id)}
-                    disabled={!hub.live}
-                    onClick={() => toggle(connection.id)}
-                  />
-                </div>
-              </li>
-            )
-          })}
+                {connectionStatus(connection)}
+              </span>
+            </li>
+          ))}
         </ul>
       )}
+      <Link to="/connections" className="text-sm text-kumo-link underline">
+        Manage connections
+      </Link>
     </Section>
   )
 }

@@ -3,6 +3,7 @@ import { getRequest } from "@tanstack/react-start/server"
 import { getAgentByName } from "agents"
 import { env } from "cloudflare:workers"
 import { DEMO_USER_ID, userIdFromRequest } from "@/lib/auth"
+import { SIDEBAR_COOKIE } from "@/lib/layout-context"
 import { botInstanceName } from "@/lib/types"
 import type { BotState, HubState } from "@/lib/types"
 import type { BotAgent } from "@/agents/bot-agent"
@@ -33,13 +34,20 @@ function viewerFromRequest(request: Request): Viewer {
  * with a WebSocket to the same UserHub.
  */
 export const getHubSnapshot = createServerFn().handler(
-  async (): Promise<{ viewer: Viewer; hub: HubState }> => {
-    const viewer = viewerFromRequest(getRequest())
+  async (): Promise<{
+    viewer: Viewer
+    hub: HubState
+    sidebarOpen: boolean
+  }> => {
+    const request = getRequest()
+    const viewer = viewerFromRequest(request)
+    const cookie = request.headers.get("Cookie") ?? ""
+    const sidebarOpen = !cookie.includes(`${SIDEBAR_COOKIE}=closed`)
     const hub = await getAgentByName(
       env.UserHub as unknown as DurableObjectNamespace<UserHub>,
       viewer.id
     )
-    return { viewer, hub: await hub.snapshot() }
+    return { viewer, hub: await hub.snapshot(), sidebarOpen }
   }
 )
 

@@ -1,4 +1,4 @@
-import type { BotState, BotSummary } from "@/lib/types"
+import type { AppCatalog, BotState, BotSummary } from "@/lib/types"
 import { NEW_BOT_NAME } from "@/lib/types"
 
 export const GREETING =
@@ -54,6 +54,7 @@ The user may have other bots. Use message_bot to hand work to the right one or t
 export function turnContext(
   state: BotState,
   others: BotSummary[],
+  apps: AppCatalog["apps"],
   now = new Date()
 ) {
   const lines: string[] = ["# Right now"]
@@ -69,18 +70,18 @@ export function turnContext(
   if (state.role) lines.push(`Your job: ${state.role}`)
 
   lines.push("", "# Connected apps")
-  if (state.apps.length === 0) {
+  if (apps.length === 0) {
     lines.push(
       "None. If the user asks for something in an app (email, calendar, CRM), say it is not connected and offer the browser instead."
     )
   } else {
-    for (const app of state.apps) {
+    for (const app of apps) {
       const status =
-        app.state === "ready"
+        app.status === "ready"
           ? `ready, ${app.tools} tools`
-          : app.state === "authenticating"
+          : app.status === "authenticating"
             ? "needs the user to authorize it in Connections"
-            : app.state
+            : app.status
       lines.push(`- ${app.name}: ${status}`)
     }
   }

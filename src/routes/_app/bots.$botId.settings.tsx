@@ -1,15 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { SettingsPanel } from "@/components/settings-panel"
-import { SidePanel } from "@/components/side-panel"
 
+// The settings panel is rendered by the bot layout so it can slide in and out;
+// this route only gives it a URL.
 export const Route = createFileRoute("/_app/bots/$botId/settings")({
-  component: SettingsRoute,
+  component: () => null,
 })
-
-function SettingsRoute() {
-  return (
-    <SidePanel title="Settings">
-      <SettingsPanel />
-    </SidePanel>
-  )
-}

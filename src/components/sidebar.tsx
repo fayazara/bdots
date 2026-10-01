@@ -13,6 +13,7 @@ import {
   PlusIcon,
 } from "@phosphor-icons/react"
 import { BotAvatar } from "@/components/bot-avatar"
+import { ShimmerText } from "@/components/thread"
 import { useHub } from "@/lib/hub-context"
 import type { BotSummary } from "@/lib/types"
 
@@ -27,7 +28,6 @@ function formatWhen(timestamp: number, now = new Date()) {
 }
 
 function previewFor(bot: BotSummary) {
-  if (bot.status === "thinking" || bot.status === "working") return "Typing…"
   if (bot.status === "action_needed") return "Needs you to continue"
   return bot.preview || "No messages yet"
 }
@@ -49,7 +49,7 @@ function BotRow({ bot, active }: { bot: BotSummary; active: boolean }) {
     <Link
       to="/bots/$botId"
       params={{ botId: bot.id }}
-      className={`flex items-center gap-3 rounded-xl px-2.5 py-2.5 outline-none focus-visible:ring-2 focus-visible:ring-kumo-focus ${
+      className={`pressable flex items-center gap-3 rounded-xl px-2.5 py-2.5 outline-none focus-visible:ring-2 focus-visible:ring-kumo-focus ${
         active ? "bg-kumo-fill" : "hover:bg-kumo-tint"
       }`}
     >
@@ -57,7 +57,7 @@ function BotRow({ bot, active }: { bot: BotSummary; active: boolean }) {
         <BotAvatar avatar={bot.avatar} status={bot.status} />
         {bot.unread && !active ? (
           <span
-            className="absolute -top-0.5 -right-0.5 size-3 rounded-full bg-kumo-danger ring-2 ring-kumo-base"
+            className="unread-dot absolute -top-0.5 -right-0.5 size-3 rounded-full bg-kumo-danger ring-2 ring-kumo-base"
             aria-label="Unread"
           />
         ) : null}
@@ -71,15 +71,19 @@ function BotRow({ bot, active }: { bot: BotSummary; active: boolean }) {
             {hydrated ? formatWhen(bot.updatedAt) : null}
           </span>
         </span>
-        <span
-          className={`block truncate text-sm ${
-            bot.status === "action_needed"
-              ? "text-kumo-warning"
-              : "text-kumo-subtle"
-          }`}
-        >
-          {previewFor(bot)}
-        </span>
+        {bot.status === "thinking" || bot.status === "working" ? (
+          <ShimmerText text="Typing…" className="block truncate text-sm" />
+        ) : (
+          <span
+            className={`block truncate text-sm ${
+              bot.status === "action_needed"
+                ? "text-kumo-warning"
+                : "text-kumo-subtle"
+            }`}
+          >
+            {previewFor(bot)}
+          </span>
+        )}
       </span>
     </Link>
   )
@@ -113,7 +117,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex w-[300px] shrink-0 flex-col pr-2 pl-1">
+    <aside className="flex h-full w-full flex-col pr-2 pl-1">
       <div className="flex items-center gap-1 pt-1 pb-2">
         <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg bg-kumo-fill px-3 text-kumo-subtle focus-within:ring-2 focus-within:ring-kumo-focus">
           <MagnifyingGlassIcon size={16} className="shrink-0" />

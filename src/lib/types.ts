@@ -44,17 +44,39 @@ export interface BotSummary {
   preview: string
   updatedAt: number
   unread: boolean
-  /** Connections (by id) this bot may use — its toolkit. */
-  connectionIds: string[]
 }
 
-/** A user-level MCP connection (Executor or any MCP server). */
+/**
+ * A user-level MCP connection (Executor or any MCP server). The UserHub holds
+ * the one live connection and its credentials; every bot uses it.
+ */
 export interface Connection {
   id: string
   name: string
   url: string
   /** Header values stay on the server; the client only learns the names. */
   headerNames: string[]
+  /** MCP client state: "ready", "authenticating", "connecting", "failed", … */
+  status: string
+  tools: number
+  /** Present while the server is waiting for the user to sign in. */
+  authUrl?: string
+  error?: string
+}
+
+/** A tool from a connection, as the UserHub describes it to bots. */
+export interface AppTool {
+  connectionId: string
+  connectionName: string
+  name: string
+  description: string
+  /** JSON Schema for the tool's arguments. */
+  inputSchema: Record<string, unknown>
+}
+
+export interface AppCatalog {
+  apps: Pick<Connection, "name" | "status" | "tools">[]
+  tools: AppTool[]
 }
 
 export interface HubState {
@@ -111,15 +133,6 @@ export interface Routine {
   kind: "cron" | "once"
 }
 
-export interface McpServerStatus {
-  connectionId: string
-  name: string
-  state: string
-  tools: number
-  authUrl?: string
-  error?: string
-}
-
 /** Synced to every client connected to a bot. */
 export interface BotState {
   name: string
@@ -129,7 +142,6 @@ export interface BotState {
   status: BotStatus
   rules: Record<ActionClass, RulePolicy>
   routines: Routine[]
-  apps: McpServerStatus[]
 }
 
 /** Metadata on a user-role message that did not come from the human. */

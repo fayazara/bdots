@@ -21,18 +21,18 @@ import { createBrowserRuntime } from "@cloudflare/think/tools/browser"
 import type { BrowserRuntime } from "@cloudflare/think/tools/browser"
 import { callable, getAgentByName } from "agents"
 import type { ContextConfig } from "agents/context"
-import { tool } from "ai"
-import type { ToolSet, UIMessage } from "ai"
+import { jsonSchema, tool } from "ai"
+import type { JSONSchema7, ToolSet, UIMessage } from "ai"
 import { createWorkersAI } from "workers-ai-provider"
 import { z } from "zod"
 import { DEFAULT_RULES, NEW_BOT_NAME } from "@/lib/types"
 import type {
   ActionClass,
+  AppCatalog,
   ActivityEntry,
   BotAvatarKind,
   BotState,
   BotStatus,
-  McpServerStatus,
   MessageOrigin,
   Routine,
   RulePolicy,
@@ -90,6 +90,7 @@ function textOf(message: UIMessage | undefined) {
       .join(" ")
       // Previews are plain text: drop Markdown emphasis and code marks.
       .replace(/[`*_#>]+/g, "")
+      .replace(/(^|\s)[-•]\s+/g, "$1")
       .replace(/\s+/g, " ")
       .trim()
   )
@@ -99,8 +100,29 @@ function clip(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 
-function mcpServerId(connectionId: string) {
-  return `c${connectionId}`
+/**
+ * Model-facing name for a connection's tool: `tool_<connection>_<tool>`,
+ * limited to the characters and length tool names allow.
+ */
+function appToolName(connectionId: string, name: string) {
+  return `tool_c${connectionId}_${name.replace(/[^a-zA-Z0-9_-]/g, "_")}`.slice(
+    0,
+    64
+  )
+}
+
+/** MCP results carry text in `content`; an `isError` result becomes a throw. */
+function unwrapToolResult(result: unknown) {
+  const r = result as {
+    content?: { type: string; text?: string }[]
+    structuredContent?: unknown
+    isError?: boolean
+  }
+  if (r?.isError) {
+    const text = r.content?.map((c) => c.text ?? "").join("\n")
+    throw new Error(text || "The app returned an error.")
+  }
+  return r?.structuredContent ?? r?.content ?? result
 }
 
 /**
@@ -115,15 +137,15 @@ export class BotAgent extends Think<Env, BotState> {
     status: "idle",
     rules: DEFAULT_RULES,
     routines: [],
-    apps: [],
   }
 
   /** `exec` from @cloudflare/computer replaces Think's built-in bash tool. */
   override workspaceBash = false
   override maxSteps = 40
-  /** MCP tools are merged in `getTools()` so rules can gate them. */
-  override includeMcpTools = false
-  override waitForMcpConnections = true
+
+  /** Tools from the user's connections, refreshed from the hub each turn. */
+  #appTools: ToolSet = {}
+  #appToolNames = new Set<string>()
 
   /**
    * The bot's computer: a durable filesystem in this Durable Object's SQLite
@@ -198,6 +220,11 @@ export class BotAgent extends Think<Env, BotState> {
       ok INTEGER NOT NULL,
       duration_ms INTEGER NOT NULL
     )`
+    // Connections used to be registered on each bot; they live on the
+    // UserHub now. Drop any leftovers so stale tokens are not kept here.
+    for (const id of Object.keys(this.getMcpServers().servers)) {
+      await this.removeMcpServer(id)
+    }
     // A turn cannot survive the isolate going away mid-status, so anything
     // other than a pending approval is stale on a fresh start.
     if (this.state.status === "thinking" || this.state.status === "working") {
@@ -221,7 +248,6 @@ export class BotAgent extends Think<Env, BotState> {
       },
     ])
     await this.report({ preview: GREETING })
-    await this.syncConnections()
     // Browser sessions that outlive their idle window are reclaimed here.
     await this.scheduleEvery(30 * 60, "sweepBrowser")
   }
@@ -255,16 +281,22 @@ export class BotAgent extends Think<Env, BotState> {
 
   override async beforeTurn(ctx: TurnContext): Promise<TurnConfig> {
     await this.setStatus("thinking")
-    this.refreshApps()
     let others: Awaited<ReturnType<UserHub["listBots"]>> = []
+    let catalog: AppCatalog = { apps: [], tools: [] }
     try {
       const hub = await this.hub()
-      others = (await hub.listBots()).filter((b) => b.id !== this.botId)
+      ;[others, catalog] = await Promise.all([
+        hub.listBots().then((bots) => bots.filter((b) => b.id !== this.botId)),
+        hub.appCatalog(),
+      ])
     } catch (err) {
-      console.error("listBots failed", err)
+      console.error("Loading bots or apps failed", err)
     }
+    this.#appTools = this.buildAppTools(catalog)
+    this.#appToolNames = new Set(Object.keys(this.#appTools))
     return {
-      instructions: `${ctx.system}\n\n${turnContext(this.state, others)}`,
+      instructions: `${ctx.system}\n\n${turnContext(this.state, others, catalog.apps)}`,
+      tools: this.#appTools,
     }
   }
 
@@ -283,15 +315,36 @@ export class BotAgent extends Think<Env, BotState> {
     return this.#browser
   }
 
-  private policyFor(toolName: string, mcpTools: Set<string>): RulePolicy {
-    const cls = mcpTools.has(toolName) ? "apps" : TOOL_CLASS[toolName]
+  private policyFor(toolName: string): RulePolicy {
+    const cls = this.#appToolNames.has(toolName) ? "apps" : TOOL_CLASS[toolName]
     return cls ? this.state.rules[cls] : "allow"
   }
 
-  override getTools(): ToolSet {
-    const mcp = this.mcp.getAITools()
-    const mcpNames = new Set(Object.keys(mcp))
+  /** Wrap the hub's catalog as AI SDK tools that call back through the hub. */
+  private buildAppTools(catalog: AppCatalog): ToolSet {
+    const tools: ToolSet = {}
+    for (const t of catalog.tools) {
+      tools[appToolName(t.connectionId, t.name)] = tool({
+        description: `[${t.connectionName}] ${t.description}`.trim(),
+        inputSchema: jsonSchema(
+          (t.inputSchema as JSONSchema7) ?? { type: "object" }
+        ),
+        needsApproval: async () => this.state.rules.apps === "ask",
+        execute: async (args) => {
+          const hub = await this.hub()
+          const result = await hub.callAppTool(
+            t.connectionId,
+            t.name,
+            (args ?? {}) as Record<string, unknown>
+          )
+          return unwrapToolResult(result)
+        },
+      })
+    }
+    return tools
+  }
 
+  override getTools(): ToolSet {
     const tools: ToolSet = {
       ...createAITools({
         workspace: this.workspace,
@@ -306,7 +359,8 @@ export class BotAgent extends Think<Env, BotState> {
         },
       }),
       ...this.browser.tools,
-      ...mcp,
+      // Last turn's catalog; beforeTurn swaps in a fresh one.
+      ...this.#appTools,
       ...this.botTools(),
     }
 
@@ -314,7 +368,7 @@ export class BotAgent extends Think<Env, BotState> {
     // "block" is enforced in beforeToolCall.
     for (const [name, def] of Object.entries(tools)) {
       if (def.needsApproval !== undefined) continue
-      const cls = mcpNames.has(name) ? "apps" : TOOL_CLASS[name]
+      const cls = TOOL_CLASS[name]
       if (!cls) continue
       tools[name] = {
         ...def,
@@ -409,8 +463,7 @@ export class BotAgent extends Think<Env, BotState> {
   }
 
   override beforeToolCall(ctx: ToolCallContext): ToolCallDecision | void {
-    const mcpNames = new Set(Object.keys(this.mcp.getAITools()))
-    if (this.policyFor(ctx.toolName, mcpNames) === "block") {
+    if (this.policyFor(ctx.toolName) === "block") {
       return {
         action: "block",
         reason:
@@ -551,51 +604,6 @@ export class BotAgent extends Think<Env, BotState> {
     return had
   }
 
-  // ── Connections (MCP) ───────────────────────────────────────────────
-
-  private refreshApps() {
-    const { servers, tools } = this.getMcpServers()
-    const apps: McpServerStatus[] = Object.entries(servers).map(
-      ([id, server]) => ({
-        connectionId: id.slice(1),
-        name: server.name,
-        state: server.state,
-        tools: tools.filter((t) => t.serverId === id).length,
-        ...(server.auth_url ? { authUrl: server.auth_url } : {}),
-        ...(server.error ? { error: server.error } : {}),
-      })
-    )
-    if (JSON.stringify(apps) !== JSON.stringify(this.state.apps)) {
-      this.setState({ ...this.state, apps })
-    }
-  }
-
-  /** Reconcile this bot's MCP servers with its toolkit in the UserHub. */
-  async syncConnections(callbackHost?: string) {
-    const hub = await this.hub()
-    const wanted = await hub.connectionsFor(this.botId)
-    const current = this.getMcpServers().servers
-    const wantedIds = new Set(wanted.map((c) => mcpServerId(c.id)))
-
-    for (const id of Object.keys(current)) {
-      if (!wantedIds.has(id)) await this.removeMcpServer(id)
-    }
-    for (const conn of wanted) {
-      const id = mcpServerId(conn.id)
-      if (current[id]) continue
-      try {
-        await this.addMcpServer(conn.name, conn.url, {
-          id,
-          callbackHost,
-          transport: { headers: conn.headers },
-        })
-      } catch (err) {
-        console.error(`MCP connection "${conn.name}" failed`, err)
-      }
-    }
-    this.refreshApps()
-  }
-
   /** Durable Object RPC: state and history for the first server render. */
   async snapshot(): Promise<{ state: BotState; messages: UIMessage[] }> {
     return { state: this.state, messages: this.messages }
@@ -619,13 +627,6 @@ export class BotAgent extends Think<Env, BotState> {
         : {}),
     })
     if (name) await this.report({ name })
-  }
-
-  /** Re-read MCP connection state, e.g. after an OAuth redirect completes. */
-  @callable()
-  refreshConnections() {
-    this.refreshApps()
-    return this.state.apps
   }
 
   @callable()

@@ -25,8 +25,8 @@ login.
   continues in the same session
 - Rules per bot (allow / ask first / block) with approval cards in the thread
 - Routines (cron or one-off), memory the bot maintains, bot-to-bot messages
-- Connections: add an [Executor](https://executor.sh) gateway or any MCP
-  server, and choose which bots may use it
+- Connections: add [Executor Cloud](https://executor.sh), a self-hosted
+  Executor, or any MCP server. You sign in once and every bot can use it
 
 Not built yet: Jev classification, inbound email and webhooks, Kitesurf,
 the container backend, R2 screenshots, group threads, login vault.
@@ -65,10 +65,10 @@ Without Cloudflare Access in front of the Worker, every visitor is the same
 
 Set in `cloudflare.config.ts`:
 
-| Variable        | Purpose                                                                                                 |
-| --------------- | ------------------------------------------------------------------------------------------------------- |
-| `MODEL`         | Chat model. A `@cf/...` id uses Workers AI; a `<provider>/<model>` slug is routed through AI Gateway.     |
-| `AI_GATEWAY_ID` | Optional. When set, Workers AI calls also go through that AI Gateway (logs, caching, spend limits).       |
+| Variable        | Purpose                                                                                               |
+| --------------- | ----------------------------------------------------------------------------------------------------- |
+| `MODEL`         | Chat model. A `@cf/...` id uses Workers AI; a `<provider>/<model>` slug is routed through AI Gateway. |
+| `AI_GATEWAY_ID` | Optional. When set, Workers AI calls also go through that AI Gateway (logs, caching, spend limits).   |
 
 ## Scripts
 

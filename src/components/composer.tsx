@@ -35,6 +35,7 @@ export function Composer({
   const textarea = useRef<HTMLTextAreaElement>(null)
 
   const canSend = !disabled && !uploading && text.trim().length > 0
+  const stopping = busy && !text.trim()
 
   function submit() {
     if (!canSend) return
@@ -144,27 +145,23 @@ export function Composer({
           }}
           className="max-h-[200px] flex-1 resize-none bg-transparent px-1 py-1.5 text-[15px] leading-6 text-kumo-default outline-none placeholder:text-kumo-placeholder"
         />
-        {busy && !text.trim() ? (
-          <Button
-            type="button"
-            variant="primary"
-            shape="circle"
-            className="btn-ink"
-            icon={<StopIcon weight="fill" />}
-            aria-label="Stop"
-            onClick={onStop}
-          />
-        ) : (
-          <Button
-            type="submit"
-            variant="primary"
-            shape="circle"
-            className="btn-ink"
-            icon={<ArrowUpIcon weight="bold" />}
-            aria-label="Send"
-            disabled={!canSend}
-          />
-        )}
+        {/* One button that swaps between send and stop, so the icon can
+            cross-fade instead of the whole control popping. */}
+        <Button
+          type={stopping ? "button" : "submit"}
+          variant="primary"
+          shape="circle"
+          className="btn-ink"
+          aria-label={stopping ? "Stop" : "Send"}
+          disabled={!stopping && !canSend}
+          onClick={stopping ? onStop : undefined}
+          icon={
+            <span className="t-icon-swap" data-state={stopping ? "b" : "a"}>
+              <ArrowUpIcon className="t-icon" data-icon="a" />
+              <StopIcon className="t-icon" data-icon="b" weight="fill" />
+            </span>
+          }
+        />
       </form>
     </div>
   )

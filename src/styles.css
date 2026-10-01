@@ -31,3 +31,240 @@
 .btn-ink {
   --color-kumo-brand: var(--color-kumo-contrast);
 }
+
+/*
+ * Motion tokens (transitions.dev scale). Components reference these instead
+ * of hardcoding durations and curves.
+ */
+:root {
+  --duration-stagger: 40ms;
+  --duration-micro: 80ms;
+  --duration-quick: 150ms;
+  --duration-fast: 250ms;
+  --duration-medium: 350ms;
+  --duration-slow: 400ms;
+  --duration-very-slow: 500ms;
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.36, 0.64, 1);
+  --blur-small: 2px;
+  --blur-medium: 3px;
+
+  /* Side panels and the bot sidebar */
+  --panel-open-dur: var(--duration-slow);
+  --panel-close-dur: var(--duration-medium);
+  --panel-ease: var(--ease-smooth-out);
+  --panel-travel: 24px;
+  --panel-blur: var(--blur-small);
+  --panel-width: clamp(400px, 44vw, 760px);
+  --sidebar-width: 300px;
+
+  /* Shimmer text (thinking / typing labels) */
+  --shimmer-dur: 2000ms;
+  --shimmer-highlight: var(--text-color-kumo-default);
+  --shimmer-band: 400%;
+
+  /* Icon swap (send ↔ stop) */
+  --icon-swap-dur: var(--duration-fast);
+  --icon-swap-start-scale: 0.25;
+}
+
+/*
+ * Sliding panels. The shell animates its width so the chat card beside it
+ * resizes with the motion; the content inside keeps its full width and
+ * slides, fades and un-blurs into place. Closing is faster than opening.
+ */
+.slide-shell {
+  flex-shrink: 0;
+  overflow: hidden;
+  width: 0;
+  transition: width var(--panel-close-dur) var(--panel-ease);
+}
+
+.slide-shell[data-open="true"] {
+  width: var(--slide-width);
+  transition-duration: var(--panel-open-dur);
+}
+
+.slide-shell > .slide-content {
+  width: var(--slide-width);
+  height: 100%;
+  opacity: 0;
+  filter: blur(var(--panel-blur));
+  transform: translateX(calc(var(--panel-travel) * var(--slide-from)));
+  transition:
+    transform var(--panel-close-dur) var(--panel-ease),
+    opacity var(--panel-close-dur) var(--panel-ease),
+    filter var(--panel-close-dur) var(--panel-ease);
+}
+
+.slide-shell[data-open="true"] > .slide-content {
+  opacity: 1;
+  filter: blur(0);
+  transform: translateX(0);
+  transition-duration: var(--panel-open-dur);
+}
+
+.slide-shell[data-side="left"] {
+  --slide-width: var(--sidebar-width);
+  --slide-from: -1;
+}
+
+.slide-shell[data-side="right"] {
+  --slide-width: var(--panel-width);
+  --slide-from: 1;
+}
+
+/* Shimmer: a highlight band sweeps across muted text while work runs. */
+.t-shimmer {
+  position: relative;
+  display: inline-block;
+}
+
+.t-shimmer::before {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 40%,
+    var(--shimmer-highlight) 50%,
+    transparent 60%,
+    transparent 100%
+  );
+  background-size: var(--shimmer-band) 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: t-shimmer var(--shimmer-dur) linear infinite;
+}
+
+@keyframes t-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0% 0;
+  }
+}
+
+/* Icon swap: two icons share one slot and cross-fade with blur + scale. */
+.t-icon-swap {
+  display: inline-grid;
+}
+
+.t-icon-swap .t-icon {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--icon-swap-dur) ease-in-out,
+    filter var(--icon-swap-dur) ease-in-out,
+    transform var(--icon-swap-dur) ease-in-out;
+}
+
+.t-icon-swap[data-state="a"] .t-icon[data-icon="b"],
+.t-icon-swap[data-state="b"] .t-icon[data-icon="a"] {
+  opacity: 0;
+  filter: blur(var(--blur-small));
+  transform: scale(var(--icon-swap-start-scale));
+}
+
+/* New messages rise in; history already on screen does not replay. */
+.msg-enter {
+  transition:
+    opacity var(--duration-fast) var(--ease-smooth-out),
+    transform var(--duration-fast) var(--ease-smooth-out),
+    filter var(--duration-fast) var(--ease-smooth-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+    filter: blur(var(--blur-small));
+  }
+}
+
+.msg-enter[data-from="user"] {
+  transform-origin: bottom right;
+}
+
+.msg-enter[data-from="bot"] {
+  transform-origin: bottom left;
+}
+
+/* Unread dot pops in with a small overshoot. */
+.unread-dot {
+  transition:
+    transform var(--duration-very-slow) var(--ease-bounce),
+    opacity var(--duration-fast) ease-out;
+
+  @starting-style {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+}
+
+/* Staggered reveal for headline + supporting copy (onboarding). */
+.reveal > * {
+  transition:
+    opacity var(--duration-very-slow) var(--ease-smooth-out),
+    transform var(--duration-very-slow) var(--ease-smooth-out),
+    filter var(--duration-very-slow) var(--ease-smooth-out);
+  transition-delay: calc(var(--i, 0) * 60ms);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(12px);
+    filter: blur(var(--blur-medium));
+  }
+}
+
+/* Anything pressable scales down a touch so it feels like it heard you. */
+.pressable {
+  transition:
+    transform 160ms ease-out,
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.pressable:active {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slide-shell,
+  .slide-shell > .slide-content,
+  .t-icon-swap .t-icon,
+  .msg-enter,
+  .unread-dot,
+  .reveal > * {
+    transition: none !important;
+  }
+
+  .slide-shell > .slide-content {
+    transform: none !important;
+    filter: none !important;
+  }
+
+  .t-shimmer::before {
+    animation: none !important;
+  }
+
+  .pressable:active {
+    transform: none;
+  }
+}
+
+/*
+ * Right-hand panels mount when they open, so they need a starting pose to
+ * slide in from. The bot sidebar is always mounted and must not animate on
+ * page load.
+ */
+.slide-shell[data-side="right"][data-open="true"] > .slide-content {
+  @starting-style {
+    opacity: 0;
+    filter: blur(var(--panel-blur));
+    transform: translateX(calc(var(--panel-travel) * var(--slide-from)));
+  }
+}

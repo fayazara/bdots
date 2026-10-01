@@ -56,6 +56,24 @@ function Prose({ text }: { text: string }) {
   )
 }
 
+/** Muted text with a highlight sweeping across it while work is running. */
+export function ShimmerText({
+  text,
+  className = "",
+}: {
+  text: string
+  className?: string
+}) {
+  return (
+    <span
+      className={`t-shimmer text-kumo-subtle ${className}`}
+      data-text={text}
+    >
+      {text}
+    </span>
+  )
+}
+
 function SystemEvent({ children }: { children: React.ReactNode }) {
   return <p className="py-1 text-center text-sm text-kumo-subtle">{children}</p>
 }
@@ -255,6 +273,11 @@ export function Thread({
 }: ThreadProps) {
   const scroller = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
+  // Messages already present on first render are history: only messages
+  // that arrive afterwards get the entrance animation.
+  const history = useRef<Set<string> | null>(null)
+  history.current ??= new Set(messages.map((m) => m.id))
+  const isNew = (id: string) => !history.current?.has(id)
 
   const rendered = useMemo(
     () =>
@@ -294,29 +317,36 @@ export function Thread({
       className="min-h-0 flex-1 overflow-y-auto"
     >
       <div className="mx-auto flex max-w-[860px] flex-col gap-3 px-6 py-6">
-        {rendered.map(({ message, blocks }) =>
-          message.role === "user" ? (
-            <UserMessage key={message.id} message={message} />
-          ) : (
-            <AssistantMessage
-              key={message.id}
-              blocks={blocks}
-              latestComputerKey={latestComputerKey}
-              getLiveView={getLiveView}
-              onApproval={onApproval}
-            />
-          )
-        )}
+        {rendered.map(({ message, blocks }) => (
+          <div
+            key={message.id}
+            className={`flex flex-col gap-3 ${isNew(message.id) ? "msg-enter" : ""}`}
+            data-from={message.role === "user" ? "user" : "bot"}
+          >
+            {message.role === "user" ? (
+              <UserMessage message={message} />
+            ) : (
+              <AssistantMessage
+                blocks={blocks}
+                latestComputerKey={latestComputerKey}
+                getLiveView={getLiveView}
+                onApproval={onApproval}
+              />
+            )}
+          </div>
+        ))}
         {busy && !streamingText && !waitingOnUser ? (
           <div
-            className="flex items-center gap-3 pt-1"
+            className="msg-enter flex items-center gap-3 pt-1"
+            data-from="bot"
             role="status"
             aria-live="polite"
           >
             <BotAvatar avatar={bot.avatar} size={40} status="thinking" />
-            <span className="text-[15px] text-kumo-subtle">
-              {bot.status === "working" ? "Working" : "Thinking"}
-            </span>
+            <ShimmerText
+              text={bot.status === "working" ? "Working" : "Thinking"}
+              className="text-[15px]"
+            />
           </div>
         ) : null}
       </div>

@@ -34,13 +34,19 @@ function Onboarding() {
   }
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 rounded-xl bg-kumo-base px-6 text-center shadow-xs ring ring-kumo-line">
-      <div className="flex items-end gap-2">
+    <div className="reveal flex flex-1 flex-col items-center justify-center gap-6 rounded-2xl bg-kumo-base px-6 text-center shadow-xs ring ring-kumo-line">
+      <div
+        className="flex items-end gap-2"
+        style={{ "--i": 0 } as React.CSSProperties}
+      >
         <BotAvatar avatar="clover" size={56} interactive />
         <BotAvatar avatar="blob" size={80} interactive />
         <BotAvatar avatar="star" size={56} interactive />
       </div>
-      <div className="max-w-md space-y-2">
+      <div
+        className="max-w-md space-y-2"
+        style={{ "--i": 1 } as React.CSSProperties}
+      >
         <h1 className="text-2xl font-semibold tracking-tight text-kumo-default">
           Create your first bot
         </h1>
@@ -51,8 +57,10 @@ function Onboarding() {
         </p>
       </div>
       <Button
+        style={{ "--i": 2 } as React.CSSProperties}
         variant="primary"
         size="lg"
+        className="btn-ink"
         icon={<PlusIcon />}
         onClick={createBot}
         loading={creating}

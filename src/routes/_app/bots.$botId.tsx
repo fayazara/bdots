@@ -10,12 +10,21 @@ import {
 import { useAgent } from "agents/react"
 import { useAgentChat } from "@cloudflare/think/react"
 import { Tooltip } from "@cloudflare/kumo/components/tooltip"
-import { GearSixIcon, MonitorIcon } from "@phosphor-icons/react"
+import {
+  GearSixIcon,
+  MonitorIcon,
+  SidebarSimpleIcon,
+} from "@phosphor-icons/react"
 import { BotAvatar } from "@/components/bot-avatar"
 import { Composer } from "@/components/composer"
+import { ComputerPanel } from "@/components/computer-panel"
+import { SettingsPanel } from "@/components/settings-panel"
+import { SidePanel } from "@/components/side-panel"
+import { SlideShell, useLatchedWhileClosing } from "@/components/slide-shell"
 import { Thread } from "@/components/thread"
 import { BotContext } from "@/lib/bot-context"
 import { useHub } from "@/lib/hub-context"
+import { useLayout } from "@/lib/layout-context"
 import { getBotSnapshot } from "@/lib/server-fns"
 import { botInstanceName } from "@/lib/types"
 import type { UIMessage } from "ai"
@@ -86,7 +95,7 @@ function PanelLink({
           params={{ botId }}
           aria-label={label}
           aria-pressed={active}
-          className={`flex size-9 items-center justify-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-kumo-focus ${
+          className={`pressable flex size-9 items-center justify-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-kumo-focus ${
             active
               ? "bg-kumo-fill text-kumo-default"
               : "text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
@@ -113,6 +122,10 @@ function BotLayout({
   const matchRoute = useMatchRoute()
   const computerOpen = !!matchRoute({ to: "/bots/$botId/computer" })
   const settingsOpen = !!matchRoute({ to: "/bots/$botId/settings" })
+  const panel = computerOpen ? "computer" : settingsOpen ? "settings" : null
+  // Keep the closing panel's content on screen while it slides away.
+  const shownPanel = useLatchedWhileClosing(panel, panel !== null)
+  const { sidebarOpen, toggleSidebar } = useLayout()
   const context = useMemo(
     () => ({ botId, state, agent }),
     [botId, state, agent]
@@ -123,6 +136,20 @@ function BotLayout({
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-kumo-base shadow-xs ring ring-kumo-line">
         <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-kumo-line px-5">
           <div className="flex min-w-0 items-center gap-2.5">
+            <Tooltip
+              content={sidebarOpen ? "Hide bots" : "Show bots"}
+              render={
+                <button
+                  type="button"
+                  onClick={toggleSidebar}
+                  aria-label={sidebarOpen ? "Hide bots" : "Show bots"}
+                  aria-pressed={!sidebarOpen}
+                  className="pressable -ml-2 flex size-9 items-center justify-center rounded-lg text-kumo-subtle outline-none hover:bg-kumo-tint hover:text-kumo-default focus-visible:ring-2 focus-visible:ring-kumo-focus"
+                >
+                  <SidebarSimpleIcon size={20} />
+                </button>
+              }
+            />
             <BotAvatar avatar={state.avatar} status={state.status} size={26} />
             <h1 className="truncate text-[15px] font-medium text-kumo-default">
               {state.name}
@@ -149,6 +176,18 @@ function BotLayout({
         </header>
         {children}
       </section>
+      <SlideShell open={panel !== null} side="right">
+        {shownPanel === "computer" ? (
+          <SidePanel title={`${state.name}'s computer`}>
+            <ComputerPanel />
+          </SidePanel>
+        ) : shownPanel === "settings" ? (
+          <SidePanel title="Settings">
+            <SettingsPanel />
+          </SidePanel>
+        ) : null}
+      </SlideShell>
+      {/* Panel routes only exist for their URLs; the panels render above. */}
       <Outlet />
     </BotContext.Provider>
   )

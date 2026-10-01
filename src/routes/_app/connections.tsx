@@ -1,14 +1,18 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { Button } from "@cloudflare/kumo/components/button"
 import { Empty } from "@cloudflare/kumo/components/empty"
 import { Input } from "@cloudflare/kumo/components/input"
 import { SensitiveInput } from "@cloudflare/kumo/components/sensitive-input"
 import { PlugsConnectedIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react"
+import { connectionStatus } from "@/lib/connection-status"
 import { useHub } from "@/lib/hub-context"
 import type { Connection } from "@/lib/types"
 
 export const Route = createFileRoute("/_app/connections")({
+  // Set by the sign-in callback when an app's OAuth flow fails.
+  validateSearch: (search: Record<string, unknown>): { error?: string } =>
+    typeof search.error === "string" ? { error: search.error } : {},
   component: Connections,
 })
 
@@ -160,6 +164,7 @@ function AddConnection() {
         <Button
           type="submit"
           variant="primary"
+          className="btn-ink"
           loading={saving}
           disabled={!hub.live || !url.trim()}
         >
@@ -181,9 +186,24 @@ function AddConnection() {
 function ConnectionRow({ connection }: { connection: Connection }) {
   const hub = useHub()
   const [removing, setRemoving] = useState(false)
-  const users = hub.state.bots.filter((b) =>
-    b.connectionIds.includes(connection.id)
-  )
+  const needsSignIn = connection.status === "authenticating"
+
+  const [retrying, setRetrying] = useState(false)
+  const failed = ![
+    "ready",
+    "authenticating",
+    "connecting",
+    "discovering",
+  ].includes(connection.status)
+
+  async function retry() {
+    setRetrying(true)
+    try {
+      await hub.reconnect(connection.id)
+    } finally {
+      setRetrying(false)
+    }
+  }
 
   async function remove() {
     setRemoving(true)
@@ -204,15 +224,39 @@ function ConnectionRow({ connection }: { connection: Connection }) {
           {connection.name}
         </p>
         <p className="truncate text-xs text-kumo-subtle">{connection.url}</p>
-        <p className="mt-0.5 truncate text-xs text-kumo-subtle">
-          {users.length === 0
-            ? "No bots use this yet"
-            : `Used by ${users.map((b) => b.name).join(", ")}`}
+        <p
+          className={`mt-0.5 truncate text-xs ${
+            connection.status === "ready"
+              ? "text-kumo-subtle"
+              : "text-kumo-warning"
+          }`}
+        >
+          {connectionStatus(connection)}
           {connection.headerNames.length > 0
             ? ` · sends ${connection.headerNames.join(", ")}`
             : ""}
         </p>
       </div>
+      {needsSignIn && connection.authUrl ? (
+        // One sign-in for the whole account; every bot uses the result.
+        <a
+          href={connection.authUrl}
+          className="pressable inline-flex h-8 shrink-0 items-center rounded-lg bg-kumo-contrast px-3 text-sm font-medium text-kumo-inverse outline-none focus-visible:ring-2 focus-visible:ring-kumo-focus"
+        >
+          Sign in
+        </a>
+      ) : null}
+      {failed ? (
+        <Button
+          variant="secondary"
+          size="sm"
+          loading={retrying}
+          disabled={!hub.live}
+          onClick={() => void retry()}
+        >
+          Try again
+        </Button>
+      ) : null}
       <Button
         variant="secondary-destructive"
         size="sm"
@@ -228,6 +272,13 @@ function ConnectionRow({ connection }: { connection: Connection }) {
 
 function Connections() {
   const hub = useHub()
+  const { error } = Route.useSearch()
+  const { live, refreshConnections } = hub
+
+  // Pick up a sign-in that just finished in this tab.
+  useEffect(() => {
+    if (live) refreshConnections()
+  }, [live, refreshConnections])
   return (
     <div className="min-w-0 flex-1 overflow-y-auto rounded-xl bg-kumo-base shadow-xs ring ring-kumo-line">
       <div className="mx-auto max-w-3xl space-y-6 px-8 py-10">
@@ -252,13 +303,22 @@ function Connections() {
           </p>
         </header>
 
+        {error ? (
+          <p
+            role="alert"
+            className="rounded-xl bg-kumo-danger-tint px-4 py-3 text-sm text-kumo-danger"
+          >
+            Sign-in didn't finish: {error}
+          </p>
+        ) : null}
+
         {hub.state.connections.length === 0 ? (
           <Empty
             icon={
               <PlugsConnectedIcon size={40} className="text-kumo-inactive" />
             }
             title="No connections yet"
-            description="Add one below. Every bot gets it by default; narrow that in each bot's settings."
+            description="Add one below. Every bot can use every connection, and you only sign in once."
           />
         ) : (
           <ul className="divide-y divide-kumo-line rounded-2xl border border-kumo-line">

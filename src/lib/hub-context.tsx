@@ -21,7 +21,8 @@ interface HubContextValue {
   markRead: (botId: string) => void
   addConnection: (input: NewConnection) => Promise<Connection>
   removeConnection: (connectionId: string) => Promise<void>
-  setBotConnections: (botId: string, ids: string[]) => Promise<void>
+  refreshConnections: () => void
+  reconnect: (connectionId: string) => Promise<void>
 }
 
 const HubContext = createContext<HubContextValue | null>(null)
@@ -58,7 +59,8 @@ export function StaticHubProvider({
       markRead: () => {},
       addConnection: notConnected,
       removeConnection: notConnected,
-      setBotConnections: notConnected,
+      refreshConnections: () => {},
+      reconnect: notConnected,
     }),
     [viewer, initial]
   )
@@ -83,8 +85,8 @@ export function LiveHubProvider({ viewer, initial, children }: ProviderProps) {
       markRead: (botId) => void agent.stub.markRead(botId),
       addConnection: (input) => agent.stub.addConnection(input),
       removeConnection: (id) => agent.stub.removeConnection(id),
-      setBotConnections: (botId, ids) =>
-        agent.stub.setBotConnections(botId, ids),
+      refreshConnections: () => void agent.stub.refreshConnections(),
+      reconnect: (id) => agent.stub.reconnect(id),
     }),
     [viewer, state, agent]
   )
