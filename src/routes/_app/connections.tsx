@@ -1,12 +1,18 @@
 import { useEffect, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { Button } from "@cloudflare/kumo/components/button"
-import { Input } from "@cloudflare/kumo/components/input"
-import { SensitiveInput } from "@cloudflare/kumo/components/sensitive-input"
-import { PlugsConnectedIcon, PlusIcon, TrashIcon } from "@/components/icons"
-import { EmptyState } from "@/components/empty-state"
+import { Tooltip } from "@cloudflare/kumo/components/tooltip"
+import { EmptyRow, FIELD, Group, Row, RowAction } from "@/components/group"
+import {
+  EyeIcon,
+  PlugsConnectedIcon,
+  PlusIcon,
+  SidebarSimpleIcon,
+  TrashIcon,
+} from "@/components/icons"
 import { connectionStatus } from "@/lib/connection-status"
 import { useHub } from "@/lib/hub-context"
+import { useLayout } from "@/lib/layout-context"
 import type { Connection } from "@/lib/types"
 
 export const Route = createFileRoute("/_app/connections")({
@@ -28,6 +34,47 @@ const EXECUTOR_HEADERS = ["CF-Access-Client-Id", "CF-Access-Client-Secret"]
 let nextKey = 0
 function emptyRow(name = ""): HeaderRow {
   return { key: nextKey++, name, value: "" }
+}
+
+function hostOf(url: string) {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
+/** A secret header value; hidden until you choose to look. */
+function SecretField({
+  value,
+  label,
+  onChange,
+}: {
+  value: string
+  label: string
+  onChange: (value: string) => void
+}) {
+  const [shown, setShown] = useState(false)
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-1">
+      <input
+        type={shown ? "text" : "password"}
+        aria-label={label}
+        placeholder="Value"
+        autoComplete="off"
+        spellCheck={false}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={`${FIELD} h-8 font-mono text-[13px]`}
+      />
+      <RowAction
+        label={shown ? "Hide value" : "Show value"}
+        onClick={() => setShown((v) => !v)}
+      >
+        <EyeIcon size={16} />
+      </RowAction>
+    </span>
+  )
 }
 
 function AddConnection() {
@@ -82,101 +129,101 @@ function AddConnection() {
   }
 
   return (
-    <form
-      onSubmit={(e) => void submit(e)}
-      className="space-y-4 rounded-2xl border border-kumo-line p-4"
-    >
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-kumo-default">
-          Add a connection
-        </h2>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          onClick={() => {
-            setName((n) => n || "Executor")
-            setHeaders(EXECUTOR_HEADERS.map((h) => emptyRow(h)))
-          }}
-        >
-          Use Executor preset
-        </Button>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Input
-          label="Name"
-          placeholder="Executor"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <Input
-          label="MCP endpoint"
-          placeholder="https://executor.example.com/mcp"
-          type="url"
-          inputMode="url"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-        />
-      </div>
-
-      {headers.length > 0 ? (
-        <fieldset className="space-y-2">
-          <legend className="mb-1 text-sm font-medium text-kumo-default">
-            Request headers
-          </legend>
-          {headers.map((row) => (
-            <div key={row.key} className="flex items-center gap-2">
-              <Input
-                aria-label="Header name"
-                placeholder="Authorization"
-                className="w-64"
-                value={row.name}
-                onChange={(e) => update(row.key, { name: e.target.value })}
-              />
-              <SensitiveInput
-                aria-label={`Value for ${row.name || "header"}`}
-                className="flex-1"
-                value={row.value}
-                onChange={(e) => update(row.key, { value: e.target.value })}
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                shape="square"
-                icon={<TrashIcon />}
-                aria-label={`Remove ${row.name || "header"}`}
-                onClick={() =>
-                  setHeaders((rows) => rows.filter((r) => r.key !== row.key))
-                }
-              />
-            </div>
-          ))}
-        </fieldset>
-      ) : null}
-
-      {error ? (
-        <p role="alert" className="text-sm text-kumo-danger">
-          {error}
-        </p>
-      ) : null}
-
-      <div className="flex items-center gap-2">
+    <form onSubmit={(e) => void submit(e)} className="space-y-2">
+      <Group
+        title="Add a connection"
+        action={
+          <button
+            type="button"
+            onClick={() => {
+              setName((n) => n || "Executor")
+              setHeaders(EXECUTOR_HEADERS.map((h) => emptyRow(h)))
+            }}
+            className="pressable h-7 rounded-full px-2.5 text-xs text-kumo-subtle outline-none hover:bg-(--fill-hover) hover:text-kumo-default focus-visible:ring-2 focus-visible:ring-kumo-focus"
+          >
+            Use Executor preset
+          </button>
+        }
+        hint="Headers are sent with every request, e.g. a Cloudflare Access service token. Values stay on the server and are never shown to a model."
+      >
+        <Row label="Name">
+          <input
+            aria-label="Name"
+            placeholder="Executor"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className={`${FIELD} h-8 max-w-[60%] text-right`}
+          />
+        </Row>
+        <Row label="MCP endpoint">
+          <input
+            aria-label="MCP endpoint"
+            placeholder="https://executor.example.com/mcp"
+            type="url"
+            inputMode="url"
+            spellCheck={false}
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            className={`${FIELD} h-8 max-w-[70%] text-right`}
+          />
+        </Row>
+        {headers.map((row) => (
+          <li
+            key={row.key}
+            className="flex min-h-14 items-center gap-3 border-t border-kumo-line py-3 pr-3 pl-4"
+          >
+            <input
+              aria-label="Header name"
+              placeholder="Header"
+              spellCheck={false}
+              value={row.name}
+              onChange={(e) => update(row.key, { name: e.target.value })}
+              className={`${FIELD} h-8 w-48 shrink-0 font-mono text-[13px]`}
+            />
+            <SecretField
+              label={`Value for ${row.name || "header"}`}
+              value={row.value}
+              onChange={(value) => update(row.key, { value })}
+            />
+            <RowAction
+              label={`Remove ${row.name || "header"}`}
+              danger
+              onClick={() =>
+                setHeaders((rows) => rows.filter((r) => r.key !== row.key))
+              }
+            >
+              <TrashIcon size={16} />
+            </RowAction>
+          </li>
+        ))}
+        <li className="border-t border-kumo-line">
+          <button
+            type="button"
+            onClick={() => setHeaders((rows) => [...rows, emptyRow()])}
+            className="flex min-h-14 w-full items-center gap-3 py-3 pr-3 pl-4 text-left text-sm text-kumo-subtle outline-none hover:bg-(--fill-hover) hover:text-kumo-default focus-visible:bg-(--fill-hover)"
+          >
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-(--fill-hover)">
+              <PlusIcon size={14} />
+            </span>
+            Add a header
+          </button>
+        </li>
+      </Group>
+      <div className="flex items-center justify-end gap-3 px-1.5">
+        {error ? (
+          <p role="alert" className="flex-1 text-xs text-pretty text-kumo-danger">
+            {error}
+          </p>
+        ) : null}
         <Button
           type="submit"
+          size="sm"
           variant="primary"
-          className="btn-ink"
+          className="btn-ink rounded-full"
           loading={saving}
           disabled={!hub.live || !url.trim()}
         >
           Connect
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          icon={<PlusIcon />}
-          onClick={() => setHeaders((rows) => [...rows, emptyRow()])}
-        >
-          Add header
         </Button>
       </div>
     </form>
@@ -215,33 +262,31 @@ function ConnectionRow({ connection }: { connection: Connection }) {
   }
 
   return (
-    <li className="flex items-center gap-3 p-4">
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-kumo-tint text-kumo-subtle">
-        <PlugsConnectedIcon size={20} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-kumo-default">
-          {connection.name}
-        </p>
-        <p className="truncate text-xs text-kumo-subtle">{connection.url}</p>
-        <p
-          className={`mt-0.5 truncate text-xs ${
-            connection.status === "ready"
-              ? "text-kumo-subtle"
-              : "text-kumo-warning"
-          }`}
-        >
-          {connectionStatus(connection)}
+    <Row
+      icon={<PlugsConnectedIcon size={14} />}
+      label={connection.name}
+      detail={
+        <>
+          <span
+            className={
+              connection.status === "ready" ? undefined : "text-kumo-warning"
+            }
+          >
+            {connectionStatus(connection)}
+          </span>
+          {" · "}
+          {hostOf(connection.url)}
           {connection.headerNames.length > 0
             ? ` · sends ${connection.headerNames.join(", ")}`
             : ""}
-        </p>
-      </div>
+        </>
+      }
+    >
       {needsSignIn && connection.authUrl ? (
         // One sign-in for the whole account; every bot uses the result.
         <a
           href={connection.authUrl}
-          className="pressable inline-flex h-8 shrink-0 items-center rounded-lg bg-kumo-contrast px-3 text-sm font-medium text-kumo-inverse outline-none focus-visible:ring-2 focus-visible:ring-kumo-focus"
+          className="pressable inline-flex h-8 shrink-0 items-center rounded-full bg-kumo-contrast px-3.5 text-sm font-medium text-kumo-inverse outline-none focus-visible:ring-2 focus-visible:ring-kumo-focus"
         >
           Sign in
         </a>
@@ -250,6 +295,7 @@ function ConnectionRow({ connection }: { connection: Connection }) {
         <Button
           variant="secondary"
           size="sm"
+          className="rounded-full"
           loading={retrying}
           disabled={!hub.live}
           onClick={() => void retry()}
@@ -257,16 +303,15 @@ function ConnectionRow({ connection }: { connection: Connection }) {
           Try again
         </Button>
       ) : null}
-      <Button
-        variant="secondary-destructive"
-        size="sm"
-        loading={removing}
-        disabled={!hub.live}
+      <RowAction
+        label={`Remove ${connection.name}`}
+        danger
+        disabled={!hub.live || removing}
         onClick={() => void remove()}
       >
-        Remove
-      </Button>
-    </li>
+        <TrashIcon size={16} />
+      </RowAction>
+    </Row>
   )
 }
 
@@ -274,61 +319,76 @@ function Connections() {
   const hub = useHub()
   const { error } = Route.useSearch()
   const { live, refreshConnections } = hub
+  const { sidebarOpen, toggleSidebar } = useLayout()
 
   // Pick up a sign-in that just finished in this tab.
   useEffect(() => {
     if (live) refreshConnections()
   }, [live, refreshConnections])
+
   return (
-    <div className="min-w-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-[720px] space-y-6 px-6 py-12">
-        <header className="space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight text-kumo-default">
-            Connections
-          </h1>
-          <p className="text-[15px] text-pretty text-kumo-subtle">
+    <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <header className="col-header relative">
+        <Tooltip
+          content={sidebarOpen ? "Hide bots" : "Show bots"}
+          render={
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              aria-label={sidebarOpen ? "Hide bots" : "Show bots"}
+              aria-pressed={!sidebarOpen}
+              className="icon-btn"
+            >
+              <SidebarSimpleIcon size={20} />
+            </button>
+          }
+        />
+        <h1 className="absolute left-1/2 -translate-x-1/2 text-[15px] font-medium text-kumo-default">
+          Connections
+        </h1>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-[640px] space-y-8 px-6 pt-6 pb-16">
+          <p className="px-1.5 text-sm text-pretty text-kumo-subtle">
             Bots reach your apps through their APIs first and only open a
             browser when there is no API. Connect an{" "}
             <a
               href="https://executor.sh/docs/hosted/cloudflare"
               target="_blank"
               rel="noreferrer noopener"
-              className="text-kumo-link underline"
+              className="text-kumo-default underline decoration-kumo-line underline-offset-2 hover:decoration-current"
             >
               Executor
             </a>{" "}
-            gateway to give them Gmail, Calendar, Sheets and the rest with one
-            endpoint, or add any MCP server directly. Tokens stay on the server
-            and are never shown to a model.
+            gateway for Gmail, Calendar, Sheets and the rest through one
+            endpoint, or add any MCP server directly.
           </p>
-        </header>
 
-        {error ? (
-          <p
-            role="alert"
-            className="rounded-xl bg-kumo-danger-tint px-4 py-3 text-sm text-kumo-danger"
+          {error ? (
+            <p
+              role="alert"
+              className="rounded-2xl bg-kumo-danger-tint px-4 py-3 text-sm text-pretty text-kumo-danger"
+            >
+              Sign-in didn't finish: {error}
+            </p>
+          ) : null}
+
+          <Group
+            title="Your connections"
+            hint="Every bot can use every connection, and you only sign in once."
           >
-            Sign-in didn't finish: {error}
-          </p>
-        ) : null}
+            {hub.state.connections.length === 0 ? (
+              <EmptyRow>No connections yet</EmptyRow>
+            ) : (
+              hub.state.connections.map((connection) => (
+                <ConnectionRow key={connection.id} connection={connection} />
+              ))
+            )}
+          </Group>
 
-        {hub.state.connections.length === 0 ? (
-          <EmptyState
-            className="py-8"
-            icon={<PlugsConnectedIcon size={24} />}
-            title="No connections yet"
-            description="Add one below. Every bot can use every connection, and you only sign in once."
-          />
-        ) : (
-          <ul className="divide-y divide-kumo-line rounded-2xl border border-kumo-line">
-            {hub.state.connections.map((connection) => (
-              <ConnectionRow key={connection.id} connection={connection} />
-            ))}
-          </ul>
-        )}
-
-        <AddConnection />
+          <AddConnection />
+        </div>
       </div>
-    </div>
+    </section>
   )
 }

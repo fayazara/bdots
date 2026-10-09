@@ -5,9 +5,16 @@ import { Dialog } from "@cloudflare/kumo/components/dialog"
 import { Loader } from "@cloudflare/kumo/components/loader"
 import { Select } from "@cloudflare/kumo/components/select"
 import { Switch } from "@cloudflare/kumo/components/switch"
-import { Tooltip } from "@cloudflare/kumo/components/tooltip"
 import { CopyButton } from "@/components/copy-button"
-import { EmptyRow, Group, Row } from "@/components/group"
+import {
+  EmptyRow,
+  FIELD,
+  Group,
+  PILL_INPUT,
+  Row,
+  RowAction,
+  SaveBar,
+} from "@/components/group"
 import {
   ArrowsClockwiseIcon,
   BookOpenTextIcon,
@@ -60,85 +67,6 @@ const POLICY_LABELS: Record<RulePolicy, string> = {
   allow: "Allow",
   ask: "Ask first",
   block: "Block",
-}
-
-/** Borderless field that sits inside a group row. */
-const FIELD =
-  "w-full bg-transparent text-sm text-kumo-default outline-none placeholder:text-kumo-placeholder"
-
-/** Small pill control for time inputs, matching Kumo's small select. */
-const PILL_INPUT =
-  "h-8 rounded-lg bg-(--fill-hover) px-2.5 text-sm text-kumo-default tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-kumo-focus disabled:opacity-50"
-
-/** Round icon button for row actions. */
-function RowAction({
-  label,
-  onClick,
-  disabled,
-  danger,
-  children,
-}: {
-  label: string
-  onClick: () => void
-  disabled?: boolean
-  danger?: boolean
-  children: React.ReactNode
-}) {
-  return (
-    <Tooltip
-      content={label}
-      render={
-        <button
-          type="button"
-          aria-label={label}
-          disabled={disabled}
-          onClick={onClick}
-          className={`icon-btn size-8! ${danger ? "hover:text-kumo-danger!" : ""}`}
-        >
-          {children}
-        </button>
-      }
-    />
-  )
-}
-
-/** Save button that only shows up once there is something to save. */
-function SaveBar({
-  dirty,
-  saving,
-  disabled,
-  onSave,
-  onReset,
-}: {
-  dirty: boolean
-  saving: boolean
-  disabled?: boolean
-  onSave: () => void
-  onReset: () => void
-}) {
-  if (!dirty) return null
-  return (
-    <div className="flex justify-end gap-2 px-1.5">
-      <Button
-        size="sm"
-        variant="ghost"
-        className="rounded-full"
-        onClick={onReset}
-      >
-        Cancel
-      </Button>
-      <Button
-        size="sm"
-        variant="primary"
-        className="btn-ink rounded-full"
-        loading={saving}
-        disabled={disabled}
-        onClick={onSave}
-      >
-        Save
-      </Button>
-    </div>
-  )
 }
 
 function Identity() {

@@ -1,3 +1,6 @@
+import { Button } from "@cloudflare/kumo/components/button"
+import { Tooltip } from "@cloudflare/kumo/components/tooltip"
+
 /**
  * Grouped list, the shape every settings-like surface uses: a small title, a
  * rounded card of rows split by hairlines, and at most one short hint below.
@@ -81,3 +84,86 @@ export function EmptyRow({ children }: { children: React.ReactNode }) {
     </li>
   )
 }
+
+/** Borderless field that sits inside a group row. */
+export const FIELD =
+  "w-full bg-transparent text-sm text-kumo-default outline-none placeholder:text-kumo-placeholder"
+
+/** Small pill control for time inputs, matching Kumo's small select. */
+export const PILL_INPUT =
+  "h-8 rounded-lg bg-(--fill-hover) px-2.5 text-sm text-kumo-default tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-kumo-focus disabled:opacity-50"
+
+/** Round icon button for row actions. */
+export function RowAction({
+  label,
+  onClick,
+  disabled,
+  danger,
+  children,
+}: {
+  label: string
+  onClick: () => void
+  disabled?: boolean
+  danger?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <Tooltip
+      content={label}
+      render={
+        <button
+          type="button"
+          aria-label={label}
+          disabled={disabled}
+          onClick={onClick}
+          className={`icon-btn size-8! ${danger ? "hover:text-kumo-danger!" : ""}`}
+        >
+          {children}
+        </button>
+      }
+    />
+  )
+}
+
+/** Save button that only shows up once there is something to save. */
+export function SaveBar({
+  dirty,
+  saving,
+  disabled,
+  onSave,
+  onReset,
+  saveLabel = "Save",
+}: {
+  dirty: boolean
+  saving: boolean
+  disabled?: boolean
+  onSave: () => void
+  onReset: () => void
+  /** Label for the primary button. */
+  saveLabel?: string
+}) {
+  if (!dirty) return null
+  return (
+    <div className="flex justify-end gap-2 px-1.5">
+      <Button
+        size="sm"
+        variant="ghost"
+        className="rounded-full"
+        onClick={onReset}
+      >
+        Cancel
+      </Button>
+      <Button
+        size="sm"
+        variant="primary"
+        className="btn-ink rounded-full"
+        loading={saving}
+        disabled={disabled}
+        onClick={onSave}
+      >
+        {saveLabel}
+      </Button>
+    </div>
+  )
+}
+

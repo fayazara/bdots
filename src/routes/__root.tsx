@@ -1,5 +1,6 @@
 import { HeadContent, Scripts, createRootRoute } from "@tanstack/react-router"
 import { TooltipProvider } from "@cloudflare/kumo/components/tooltip"
+import { CodeProvider } from "@/components/code-block"
 import appCss from "../styles.css?url"
 
 export const Route = createRootRoute({
@@ -23,7 +24,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       <body className="bg-kumo-canvas text-kumo-default antialiased">
         {/* `isolate` keeps Kumo's portalled popups above the app layout. */}
         <div className="isolate h-svh">
-          <TooltipProvider>{children}</TooltipProvider>
+          <TooltipProvider>
+            <CodeProvider>{children}</CodeProvider>
+          </TooltipProvider>
         </div>
         <Scripts />
       </body>

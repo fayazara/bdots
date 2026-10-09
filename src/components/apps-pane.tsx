@@ -246,7 +246,7 @@ function AppDetail({
       </div>
 
       {owner ? (
-        <div className="mx-4 aspect-[16/10] shrink-0 overflow-hidden rounded-xl bg-white outline outline-1 -outline-offset-1 outline-black/[0.06]">
+        <div className="mx-4 aspect-[16/10] shrink-0 overflow-hidden rounded-2xl bg-white outline outline-1 -outline-offset-1 outline-black/[0.06]">
           <iframe
             key={app.version}
             title={`${app.name} preview`}

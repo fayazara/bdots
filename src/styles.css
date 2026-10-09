@@ -8,6 +8,16 @@
  */
 @custom-variant dark (&:where([data-mode="dark"], [data-mode="dark"] *));
 
+/*
+ * Code uses Berkeley Mono when it is installed on the system (never
+ * downloaded), then the platform's own mono font.
+ */
+@theme {
+  --font-mono:
+    "Berkeley Mono", "TX-02", ui-monospace, "SF Mono", SFMono-Regular, Menlo,
+    Monaco, "Cascadia Code", Consolas, "Liberation Mono", monospace;
+}
+
 @layer base {
   html {
     font-family:
@@ -181,6 +191,58 @@
   --tabs-text-active: var(--text-color-kumo-default);
   --tabs-bar-bg: var(--color-kumo-tint);
   --tabs-pill-bg: var(--color-kumo-base);
+
+  /* Accordion expand (activity rows) */
+  --acc-expand: var(--duration-fast);
+  --acc-collapse: var(--duration-fast);
+  --acc-chevron: var(--duration-fast);
+  --acc-ease: var(--ease-smooth-out);
+}
+
+/* Accordion: grid-template-rows 0fr → 1fr, no JS height measuring. */
+.t-acc-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--acc-collapse) var(--acc-ease);
+}
+.t-acc[data-open="true"] .t-acc-panel {
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--acc-expand) var(--acc-ease);
+}
+.t-acc-panel-inner {
+  overflow: hidden;
+  opacity: 0;
+  filter: blur(2px);
+  transition:
+    opacity var(--acc-collapse) var(--acc-ease),
+    filter var(--acc-collapse) var(--acc-ease);
+}
+.t-acc[data-open="true"] .t-acc-panel-inner {
+  opacity: 1;
+  filter: blur(0);
+  transition:
+    opacity var(--acc-expand) var(--acc-ease),
+    filter var(--acc-expand) var(--acc-ease);
+}
+.t-acc-chevron {
+  display: inline-flex;
+  transform: scaleY(1);
+  transform-origin: center;
+  transition: transform var(--acc-chevron) var(--acc-ease);
+}
+.t-acc-chevron path {
+  vector-effect: non-scaling-stroke;
+}
+.t-acc[data-open="true"] .t-acc-chevron {
+  transform: scaleY(-1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-acc-panel,
+  .t-acc-panel-inner,
+  .t-acc-chevron {
+    transition: none !important;
+  }
 }
 
 /*

@@ -15,6 +15,7 @@ import {
   WebhooksLogoIcon,
 } from "@/components/icons"
 import { BotAvatar } from "@/components/bot-avatar"
+import { CodeBlock } from "@/components/code-block"
 import { ComputerCard } from "@/components/computer-card"
 import {
   describeCall,
@@ -48,13 +49,28 @@ interface ThreadProps {
 
 function Prose({ text }: { text: string }) {
   return (
-    <div className="bubble-prose space-y-3 text-[15px] leading-6 text-pretty [&_a]:text-kumo-link [&_a]:underline [&_code]:rounded [&_code]:bg-kumo-fill [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[13px] [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:font-semibold [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-kumo-fill [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_table]:text-sm [&_td]:border-t [&_td]:border-kumo-line [&_td]:px-2 [&_td]:py-1 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_ul]:list-disc [&_ul]:pl-5">
+    <div className="bubble-prose space-y-3 text-[15px] leading-6 text-pretty [&_a]:text-kumo-link [&_a]:underline [&_code]:rounded [&_code]:bg-kumo-fill [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[13px] [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:font-semibold [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_pre_code]:rounded-none [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_table]:text-sm [&_td]:border-t [&_td]:border-kumo-line [&_td]:px-2 [&_td]:py-1 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_ul]:list-disc [&_ul]:pl-5">
       <Markdown
         remarkPlugins={[remarkGfm]}
         components={{
           a: ({ node: _node, ...props }) => (
             <a {...props} target="_blank" rel="noreferrer noopener" />
           ),
+          // Fenced blocks get highlighted; inline `code` stays a small chip.
+          pre: ({ children }) => <>{children}</>,
+          code: ({ node: _node, className, children, ...props }) => {
+            const text = String(children ?? "")
+            const lang = /language-([\w-]+)/.exec(className ?? "")?.[1]
+            if (!lang && !text.includes("\n"))
+              return <code {...props}>{children}</code>
+            return (
+              <CodeBlock
+                code={text.replace(/\n$/, "")}
+                lang={lang}
+                className="rounded-2xl bg-(--fill-hover) px-4 py-3"
+              />
+            )
+          },
         }}
       >
         {text}
@@ -154,9 +170,11 @@ function ApprovalCard({
       </p>
       <p className="mt-1 text-[15px] text-kumo-default">{describeCall(call)}</p>
       {details !== "{}" ? (
-        <pre className="mt-3 max-h-48 overflow-auto rounded-lg bg-kumo-fill p-3 text-xs text-kumo-default">
-          {details}
-        </pre>
+        <CodeBlock
+          code={details}
+          lang="json"
+          className="mt-3 max-h-60 rounded-2xl bg-kumo-base p-3"
+        />
       ) : null}
       {onApproval && call.approvalId ? (
         <div className="mt-3 flex gap-2">

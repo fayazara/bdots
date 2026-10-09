@@ -4,6 +4,7 @@ import { Button } from "@cloudflare/kumo/components/button"
 import { Loader } from "@cloudflare/kumo/components/loader"
 import {
   ArrowClockwiseIcon,
+  CaretDownIcon,
   CheckIcon,
   GlobeIcon,
   ListBulletsIcon,
@@ -12,7 +13,9 @@ import {
 } from "@/components/icons"
 import { AppsPane } from "@/components/apps-pane"
 import { LiveViewFrame, useLiveView } from "@/components/computer-card"
+import { CodeBlock, languageForPath } from "@/components/code-block"
 import { EmptyState } from "@/components/empty-state"
+import { Group, RowAction } from "@/components/group"
 import { SidePanel } from "@/components/side-panel"
 import { SlidingTabs } from "@/components/sliding-tabs"
 import { useBot } from "@/lib/bot-context"
@@ -115,7 +118,7 @@ function BrowserPane({ agent }: { agent: BotConnection }) {
         </button>
       </div>
       <p className="truncate px-1 text-xs text-kumo-subtle">{tab.pageUrl}</p>
-      <div className="min-h-0 flex-1 overflow-hidden rounded-xl bg-white outline outline-1 -outline-offset-1 outline-black/[0.06]">
+      <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-white outline outline-1 -outline-offset-1 outline-black/[0.06]">
         <LiveViewFrame tab={tab} interactive className="h-full" />
       </div>
     </div>
@@ -185,7 +188,7 @@ function TerminalPane({ agent }: { agent: BotConnection }) {
   }
 
   return (
-    <div className="mx-4 mt-2 mb-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-kumo-contrast font-mono text-[13px] text-kumo-inverse">
+    <div className="mx-4 mt-2 mb-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-kumo-contrast font-mono text-[13px] text-kumo-inverse">
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {lines.length === 0 ? (
           <p className="opacity-60">
@@ -308,7 +311,7 @@ function FilesPane({ agent }: { agent: BotConnection }) {
   }, [refresh])
 
   return (
-    <div className="mx-4 mt-2 mb-4 flex min-h-0 flex-1 overflow-hidden rounded-xl bg-kumo-base outline outline-1 -outline-offset-1 outline-black/[0.06]">
+    <div className="mx-4 mt-2 mb-4 flex min-h-0 flex-1 overflow-hidden rounded-2xl bg-kumo-base outline outline-1 -outline-offset-1 outline-black/[0.06]">
       <div className="flex w-60 shrink-0 flex-col border-r border-kumo-line">
         <div className="flex h-10 items-center justify-between pr-1 pl-4">
           <span className="text-xs font-medium text-kumo-subtle">
@@ -350,9 +353,11 @@ function FilesPane({ agent }: { agent: BotConnection }) {
               {WORKSPACE_ROOT}/{selected}
               {preview.truncated ? " · truncated" : ""}
             </p>
-            <pre className="p-4 font-mono text-[13px] break-words whitespace-pre-wrap text-kumo-default">
-              {preview.content || "(empty file)"}
-            </pre>
+            <CodeBlock
+              code={preview.content || "(empty file)"}
+              lang={preview.content ? languageForPath(selected) : undefined}
+              className="p-4"
+            />
           </>
         )}
       </div>
@@ -365,6 +370,14 @@ function ActivityPane({ agent }: { agent: BotConnection }) {
     (ActivityEntry & { detail: string })[] | null
   >(null)
   const [open, setOpen] = useState<number | null>(null)
+  // Rows keep their output mounted after the first open so closing can
+  // animate, without highlighting every row up front.
+  const [seen, setSeen] = useState<ReadonlySet<number>>(() => new Set())
+
+  function toggle(id: number) {
+    setOpen(open === id ? null : id)
+    setSeen((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
+  }
 
   const load = useCallback(async () => {
     setEntries(await agent.stub.getActivity(200))
@@ -393,37 +406,43 @@ function ActivityPane({ agent }: { agent: BotConnection }) {
     )
   }
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="flex items-center justify-between pt-2 pr-2 pl-4">
-        <span className="text-xs text-kumo-subtle">Recent tool calls</span>
-        <button
-          type="button"
-          aria-label="Refresh activity"
-          onClick={() => void load()}
-          className="icon-btn size-8!"
-        >
-          <ArrowClockwiseIcon size={16} />
-        </button>
-      </div>
-      <ul className="px-1 pb-4">
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-2 pb-6">
+      <Group
+        title="Recent tool calls"
+        action={
+          <RowAction label="Refresh activity" onClick={() => void load()}>
+            <ArrowClockwiseIcon size={16} />
+          </RowAction>
+        }
+      >
         {entries.map((entry) => (
-          <li key={entry.id}>
+          <li
+            key={entry.id}
+            data-open={open === entry.id}
+            className="t-acc border-t border-kumo-line first:border-t-0"
+          >
             <button
               type="button"
-              onClick={() => setOpen(open === entry.id ? null : entry.id)}
+              onClick={() => toggle(entry.id)}
               aria-expanded={open === entry.id}
-              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm outline-none hover:bg-kumo-tint focus-visible:ring-2 focus-visible:ring-kumo-focus"
+              className="flex min-h-14 w-full items-center gap-4 py-3 pr-4 pl-4 text-left outline-none hover:bg-(--fill-hover) focus-visible:bg-(--fill-hover)"
             >
-              {entry.ok ? (
-                <CheckIcon size={14} className="shrink-0 text-kumo-success" />
-              ) : (
-                <WarningIcon size={14} className="shrink-0 text-kumo-warning" />
-              )}
-              <span className="w-32 shrink-0 truncate font-mono text-xs text-kumo-default">
-                {entry.tool}
+              <span
+                className={`flex size-7 shrink-0 items-center justify-center rounded-full ${
+                  entry.ok
+                    ? "bg-(--fill-hover) text-kumo-subtle"
+                    : "bg-kumo-warning-tint text-kumo-warning"
+                }`}
+              >
+                {entry.ok ? <CheckIcon size={14} /> : <WarningIcon size={14} />}
               </span>
-              <span className="min-w-0 flex-1 truncate text-kumo-subtle">
-                {entry.summary}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-mono text-[13px] text-kumo-default">
+                  {entry.tool}
+                </span>
+                <span className="mt-0.5 block max-w-[75%] truncate text-xs text-kumo-subtle">
+                  {entry.summary}
+                </span>
               </span>
               <span className="shrink-0 text-xs text-kumo-subtle tabular-nums">
                 {new Date(entry.at).toLocaleTimeString([], {
@@ -431,15 +450,23 @@ function ActivityPane({ agent }: { agent: BotConnection }) {
                   minute: "2-digit",
                 })}
               </span>
+              <span className="t-acc-chevron shrink-0 text-kumo-subtle">
+                <CaretDownIcon size={14} />
+              </span>
             </button>
-            {open === entry.id ? (
-              <pre className="mx-3 mt-1 mb-2 max-h-64 overflow-auto rounded-lg bg-kumo-fill p-3 font-mono text-xs break-words whitespace-pre-wrap text-kumo-default">
-                {entry.detail || "(no output)"}
-              </pre>
-            ) : null}
+            <div className="t-acc-panel">
+              <div className="t-acc-panel-inner">
+                {seen.has(entry.id) ? (
+                  <CodeBlock
+                    code={entry.detail || "(no output)"}
+                    className="mx-4 mb-4 max-h-80 rounded-xl bg-kumo-canvas p-3 outline outline-1 -outline-offset-1 outline-kumo-line"
+                  />
+                ) : null}
+              </div>
+            </div>
           </li>
         ))}
-      </ul>
+      </Group>
     </div>
   )
 }
