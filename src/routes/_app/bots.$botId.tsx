@@ -14,7 +14,7 @@ import {
   GearSixIcon,
   MonitorIcon,
   SidebarSimpleIcon,
-} from "@phosphor-icons/react"
+} from "@/components/icons"
 import { BotAvatar } from "@/components/bot-avatar"
 import { Composer } from "@/components/composer"
 import { ComputerPanel } from "@/components/computer-panel"
@@ -95,11 +95,7 @@ function PanelLink({
           params={{ botId }}
           aria-label={label}
           aria-pressed={active}
-          className={`pressable flex size-9 items-center justify-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-kumo-focus ${
-            active
-              ? "bg-kumo-fill text-kumo-default"
-              : "text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
-          }`}
+          className="icon-btn"
         >
           {children}
         </Link>
@@ -133,24 +129,25 @@ function BotLayout({
 
   return (
     <BotContext.Provider value={context}>
-      <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-kumo-base shadow-xs ring ring-kumo-line">
-        <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-kumo-line px-5">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <Tooltip
-              content={sidebarOpen ? "Hide bots" : "Show bots"}
-              render={
-                <button
-                  type="button"
-                  onClick={toggleSidebar}
-                  aria-label={sidebarOpen ? "Hide bots" : "Show bots"}
-                  aria-pressed={!sidebarOpen}
-                  className="pressable -ml-2 flex size-9 items-center justify-center rounded-lg text-kumo-subtle outline-none hover:bg-kumo-tint hover:text-kumo-default focus-visible:ring-2 focus-visible:ring-kumo-focus"
-                >
-                  <SidebarSimpleIcon size={20} />
-                </button>
-              }
-            />
-            <BotAvatar avatar={state.avatar} status={state.status} size={26} />
+      <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="col-header relative justify-between">
+          <Tooltip
+            content={sidebarOpen ? "Hide bots" : "Show bots"}
+            render={
+              <button
+                type="button"
+                onClick={toggleSidebar}
+                aria-label={sidebarOpen ? "Hide bots" : "Show bots"}
+                aria-pressed={!sidebarOpen}
+                className="icon-btn"
+              >
+                <SidebarSimpleIcon size={20} />
+              </button>
+            }
+          />
+          {/* The bot's name floats in the middle, like a window title. */}
+          <div className="absolute left-1/2 flex h-9 max-w-[50%] -translate-x-1/2 items-center gap-2 rounded-full bg-kumo-base pr-4 pl-1.5 shadow-[0_0_0_1px_var(--color-kumo-line),0_1px_2px_oklch(0_0_0/0.04),0_2px_8px_oklch(0_0_0/0.04)]">
+            <BotAvatar avatar={state.avatar} status={state.status} size={24} />
             <h1 className="truncate text-[15px] font-medium text-kumo-default">
               {state.name}
             </h1>
@@ -178,9 +175,7 @@ function BotLayout({
       </section>
       <SlideShell open={panel !== null} side="right">
         {shownPanel === "computer" ? (
-          <SidePanel title={`${state.name}'s computer`}>
-            <ComputerPanel />
-          </SidePanel>
+          <ComputerPanel />
         ) : shownPanel === "settings" ? (
           <SidePanel title="Settings">
             <SettingsPanel />
@@ -217,6 +212,15 @@ function LiveBot({
     if (unread) markRead(botId)
   }, [unread, botId, markRead])
 
+  // Quiet hours and the bot's sense of "today" follow the user's clock.
+  const timezone = state.proactive?.timezone
+  const connected = agent.state !== undefined
+  useEffect(() => {
+    if (!connected) return
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    if (zone && zone !== timezone) void agent.stub.setTimezone(zone)
+  }, [agent, connected, timezone])
+
   const getLiveView = useCallback(() => agent.stub.getLiveView(), [agent])
 
   const onApproval = useCallback<OnApproval>(
@@ -249,7 +253,7 @@ function LiveBot({
       {chat.error ? (
         <p
           role="alert"
-          className="mx-auto w-full max-w-[860px] px-8 pb-2 text-sm text-kumo-danger"
+          className="mx-auto w-full max-w-[820px] px-6 pb-2 text-sm text-kumo-danger"
         >
           {chat.error.message ||
             "Something went wrong. Try sending that again."}
@@ -258,7 +262,9 @@ function LiveBot({
       <Composer
         botName={state.name}
         busy={busy}
-        onSend={(text) => void chat.sendMessage({ text })}
+        onSend={(text) =>
+          void chat.sendMessage({ text, metadata: { at: Date.now() } })
+        }
         onStop={() => void chat.stop()}
         onAttach={onAttach}
       />

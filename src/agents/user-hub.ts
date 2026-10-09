@@ -1,5 +1,6 @@
 import { Agent, callable, getAgentByName } from "agents"
 import type { Connection as AgentConnection, ConnectionContext } from "agents"
+import webpush from "web-push"
 import { BOT_AVATARS, NEW_BOT_NAME, botInstanceName } from "@/lib/types"
 import type {
   AppCatalog,
@@ -7,8 +8,22 @@ import type {
   BotSummary,
   Connection,
   HubState,
+  PushSubscriptionData,
 } from "@/lib/types"
 import type { BotAgent } from "./bot-agent"
+
+const READ_VERBS =
+  /(^|[_\-.])(get|list|search|read|fetch|find|query|lookup|describe|view|show|count)([_\-.]|$)/i
+const WRITE_VERBS =
+  /(^|[_\-.])(send|create|delete|remove|update|edit|post|write|set|move|archive|reply|forward|draft|cancel|pay|approve|invite|share|execute|run)([_\-.]|$)/i
+
+/**
+ * Background turns may only use read-only app tools. Servers that do not
+ * annotate their tools get a conservative guess from the name.
+ */
+function looksReadOnly(name: string) {
+  return READ_VERBS.test(name) && !WRITE_VERBS.test(name)
+}
 
 /** MCP server id for a connection; it namespaces the connection's tools. */
 function serverId(connectionId: string) {
@@ -30,6 +45,12 @@ export class UserHub extends Agent<Env, HubState> {
   initialState: HubState = { bots: [], connections: [] }
 
   async onStart() {
+    // Push endpoints are capability URLs: keep them out of broadcast state.
+    this.sql`CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint TEXT PRIMARY KEY,
+      data TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )`
     // After an MCP sign-in completes, send the user back to Connections.
     this.mcp.configureOAuthCallback({
       customHandler: (result) => {
@@ -188,6 +209,94 @@ export class UserHub extends Agent<Env, HubState> {
     this.syncConnectionStatus()
   }
 
+  // ── Push notifications ──────────────────────────────────────────────
+
+  /** Null when the deployment has no VAPID keys, so push is unavailable. */
+  @callable()
+  pushPublicKey(): string | null {
+    return this.env.VAPID_PUBLIC_KEY && this.env.VAPID_PRIVATE_KEY
+      ? this.env.VAPID_PUBLIC_KEY
+      : null
+  }
+
+  @callable()
+  subscribePush(subscription: PushSubscriptionData) {
+    const url = new URL(subscription.endpoint)
+    if (url.protocol !== "https:") throw new Error("Invalid push endpoint")
+    if (!subscription.keys?.p256dh || !subscription.keys?.auth) {
+      throw new Error("Push subscription is missing its keys")
+    }
+    this
+      .sql`INSERT OR REPLACE INTO push_subscriptions (endpoint, data, created_at)
+      VALUES (${subscription.endpoint}, ${JSON.stringify(subscription)}, ${Date.now()})`
+  }
+
+  @callable()
+  unsubscribePush(endpoint: string) {
+    this.sql`DELETE FROM push_subscriptions WHERE endpoint = ${endpoint}`
+  }
+
+  @callable()
+  isPushSubscribed(endpoint: string): boolean {
+    return (
+      this.sql<{ n: number }>`SELECT COUNT(*) AS n FROM push_subscriptions
+        WHERE endpoint = ${endpoint}`[0]?.n > 0
+    )
+  }
+
+  /** Send a test notification to every device this user subscribed. */
+  @callable()
+  async testPush() {
+    return this.push({
+      title: "bdots",
+      body: "Notifications are on. Your bots will reach you here.",
+      tag: "test",
+      url: "/",
+    })
+  }
+
+  private async push(payload: {
+    title: string
+    body: string
+    tag: string
+    url: string
+  }): Promise<{ sent: number }> {
+    const publicKey = this.pushPublicKey()
+    if (!publicKey) return { sent: 0 }
+    const rows = this.sql<{ endpoint: string; data: string }>`
+      SELECT endpoint, data FROM push_subscriptions`
+    if (rows.length === 0) return { sent: 0 }
+    webpush.setVapidDetails(
+      this.env.VAPID_SUBJECT,
+      publicKey,
+      this.env.VAPID_PRIVATE_KEY
+    )
+    let sent = 0
+    await Promise.all(
+      rows.map(async (row) => {
+        try {
+          await webpush.sendNotification(
+            JSON.parse(row.data) as PushSubscriptionData,
+            JSON.stringify(payload),
+            { TTL: 60 * 60 * 12 }
+          )
+          sent++
+        } catch (err) {
+          const status =
+            err instanceof webpush.WebPushError ? err.statusCode : 0
+          // The browser unsubscribed or the subscription expired.
+          if (status === 404 || status === 410) {
+            this
+              .sql`DELETE FROM push_subscriptions WHERE endpoint = ${row.endpoint}`
+          } else {
+            console.error("Push failed", status, err)
+          }
+        }
+      })
+    )
+    return { sent }
+  }
+
   /** Copy live MCP client state (status, sign-in URL, tool count) into `state`. */
   private syncConnectionStatus() {
     const { servers, tools } = this.getMcpServers()
@@ -290,6 +399,24 @@ export class UserHub extends Agent<Env, HubState> {
     return this.state.bots
   }
 
+  /** Inbound email and webhooks check this before waking a bot. */
+  async hasBot(botId: string): Promise<boolean> {
+    return this.state.bots.some((b) => b.id === botId)
+  }
+
+  /** A bot has something for the user: push it to their devices. */
+  async notifyUser(botId: string, body: string) {
+    const bot = this.state.bots.find((b) => b.id === botId)
+    if (!bot) return { sent: 0 }
+    return this.push({
+      title: bot.name,
+      body,
+      // One notification per bot: a newer one replaces the older.
+      tag: `bot-${botId}`,
+      url: `/bots/${botId}`,
+    })
+  }
+
   /** Every connected tool, for a bot's next turn. */
   async appCatalog(): Promise<AppCatalog> {
     await this.mcp.waitForConnections({ timeout: 5000 })
@@ -307,6 +434,7 @@ export class UserHub extends Agent<Env, HubState> {
         name: t.name,
         description: t.description ?? "",
         inputSchema: t.inputSchema as Record<string, unknown>,
+        readOnly: t.annotations?.readOnlyHint ?? looksReadOnly(t.name),
       })
     }
     return {
@@ -335,6 +463,11 @@ export class UserHub extends Agent<Env, HubState> {
     })
     // Structured clone over RPC: keep the plain JSON parts of the result.
     return JSON.parse(JSON.stringify(result)) as unknown
+  }
+
+  /** Where the user opens bdots, so bots can hand out full app links. */
+  async appOrigin(): Promise<string | null> {
+    return this.origin ?? null
   }
 
   /** Deliver a message from one bot to another, matched by name or id. */

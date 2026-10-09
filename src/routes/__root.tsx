@@ -1,6 +1,5 @@
 import { HeadContent, Scripts, createRootRoute } from "@tanstack/react-router"
 import { TooltipProvider } from "@cloudflare/kumo/components/tooltip"
-import { IconContext } from "@phosphor-icons/react"
 import appCss from "../styles.css?url"
 
 export const Route = createRootRoute({
@@ -23,18 +22,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       </head>
       <body className="bg-kumo-canvas text-kumo-default antialiased">
         {/* `isolate` keeps Kumo's portalled popups above the app layout. */}
-        <div className="isolate h-svh p-1.5">
-          {/* Phosphor's regular weight reads too thin at our sizes. */}
-          <IconContext.Provider
-            value={{
-              color: "currentColor",
-              size: "1em",
-              weight: "bold",
-              mirrored: false,
-            }}
-          >
-            <TooltipProvider>{children}</TooltipProvider>
-          </IconContext.Provider>
+        <div className="isolate h-svh">
+          <TooltipProvider>{children}</TooltipProvider>
         </div>
         <Scripts />
       </body>

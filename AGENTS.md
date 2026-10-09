@@ -58,7 +58,9 @@ Things that will bite you:
   a database is added
 - **Zod** for input validation (`drizzle-zod` for table-derived schemas)
 - **Tailwind v4** + **Kumo** (`@cloudflare/kumo`) for UI
-- **Phosphor Icons** (`@phosphor-icons/react`) — Kumo's recommended icon set
+- **Hugeicons** (`@hugeicons/react` + `@hugeicons/core-free-icons`) — import
+  icons from `@/components/icons`, which wraps them at `1em` with the default
+  stroke. Phosphor stays installed only as Kumo's peer dependency.
 - **pnpm** as the package manager
 
 ## Rules that matter most

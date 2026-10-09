@@ -1,28 +1,39 @@
 import { Link } from "@tanstack/react-router"
-import { XIcon } from "@phosphor-icons/react"
+import { XIcon } from "@/components/icons"
 import { useBot } from "@/lib/bot-context"
 
 /**
  * Right-hand panel beside the thread (Computer, Settings). It sits on the page
- * canvas like the sidebar; only the chat is an elevated card.
+ * canvas like the sidebar, split from the chat by a hairline. Content inside
+ * uses 16px side padding, which the header title lines up with.
  */
 export function SidePanel({
   title,
+  toolbar,
   children,
 }: {
   title: string
+  /** Shown in the header instead of the title, e.g. the Computer's tabs. */
+  toolbar?: React.ReactNode
   children: React.ReactNode
 }) {
   const { botId } = useBot()
   return (
-    <aside aria-label={title} className="flex h-full flex-col">
-      <div className="flex h-14 shrink-0 items-center justify-between px-5">
-        <h2 className="text-[15px] font-medium text-kumo-default">{title}</h2>
+    <aside
+      aria-label={title}
+      className="flex h-full flex-col border-l border-kumo-line bg-kumo-canvas"
+    >
+      <div className="col-header justify-between">
+        {toolbar ?? (
+          <h2 className="pl-1.5 text-[15px] font-medium text-kumo-default">
+            {title}
+          </h2>
+        )}
         <Link
           to="/bots/$botId"
           params={{ botId }}
           aria-label={`Close ${title.toLowerCase()}`}
-          className="flex size-8 items-center justify-center rounded-lg text-kumo-subtle outline-none hover:bg-kumo-tint hover:text-kumo-default focus-visible:ring-2 focus-visible:ring-kumo-focus"
+          className="icon-btn"
         >
           <XIcon size={18} />
         </Link>

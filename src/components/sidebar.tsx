@@ -5,17 +5,79 @@ import {
   useNavigate,
   useParams,
 } from "@tanstack/react-router"
-import { Button } from "@cloudflare/kumo/components/button"
+import { DropdownMenu } from "@cloudflare/kumo/components/dropdown"
+import { Loader } from "@cloudflare/kumo/components/loader"
 import { Tooltip } from "@cloudflare/kumo/components/tooltip"
 import {
+  BellIcon,
+  BellRingingIcon,
+  BellSlashIcon,
   GearSixIcon,
   MagnifyingGlassIcon,
   PlusIcon,
-} from "@phosphor-icons/react"
+} from "@/components/icons"
 import { BotAvatar } from "@/components/bot-avatar"
 import { ShimmerText } from "@/components/thread"
 import { useHub } from "@/lib/hub-context"
+import { usePushNotifications } from "@/lib/push"
 import type { BotSummary } from "@/lib/types"
+
+const FOOTER_BUTTON = "icon-btn"
+
+/** Lets bots reach this device when bdots is closed. */
+function NotificationsButton() {
+  const { status, busy, enable, disable, test } = usePushNotifications()
+  if (status === "loading" || status === "unsupported") return null
+
+  if (status !== "on") {
+    const blocked = status === "denied"
+    return (
+      <Tooltip
+        content={
+          blocked
+            ? "Notifications are blocked in your browser settings"
+            : "Get notified when a bot needs you"
+        }
+        render={
+          <button
+            type="button"
+            aria-label="Turn on notifications"
+            disabled={blocked || busy}
+            onClick={() => void enable()}
+            className={FOOTER_BUTTON}
+          >
+            <BellSlashIcon size={18} />
+          </button>
+        }
+      />
+    )
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenu.Trigger
+        render={(props) => (
+          <button
+            {...props}
+            type="button"
+            aria-label="Notifications"
+            className={FOOTER_BUTTON}
+          >
+            <BellIcon size={18} />
+          </button>
+        )}
+      />
+      <DropdownMenu.Content side="top" align="end">
+        <DropdownMenu.Item icon={<BellRingingIcon />} onClick={() => void test()}>
+          Send a test notification
+        </DropdownMenu.Item>
+        <DropdownMenu.Item icon={<BellSlashIcon />} onClick={() => void disable()}>
+          Turn off on this device
+        </DropdownMenu.Item>
+      </DropdownMenu.Content>
+    </DropdownMenu>
+  )
+}
 
 function formatWhen(timestamp: number, now = new Date()) {
   const date = new Date(timestamp)
@@ -49,15 +111,15 @@ function BotRow({ bot, active }: { bot: BotSummary; active: boolean }) {
     <Link
       to="/bots/$botId"
       params={{ botId: bot.id }}
-      className={`pressable flex items-center gap-3 rounded-xl px-2.5 py-2.5 outline-none focus-visible:ring-2 focus-visible:ring-kumo-focus ${
-        active ? "bg-kumo-fill" : "hover:bg-kumo-tint"
+      className={`pressable flex items-center gap-3 rounded-xl px-2.5 py-2 outline-none focus-visible:ring-2 focus-visible:ring-kumo-focus ${
+        active ? "bg-(--fill-active)" : "hover:bg-(--fill-hover)"
       }`}
     >
       <span className="relative">
-        <BotAvatar avatar={bot.avatar} status={bot.status} />
+        <BotAvatar avatar={bot.avatar} status={bot.status} size={40} />
         {bot.unread && !active ? (
           <span
-            className="unread-dot absolute -top-0.5 -right-0.5 size-3 rounded-full bg-kumo-danger ring-2 ring-kumo-base"
+            className="unread-dot absolute -top-0.5 -right-0.5 size-3 rounded-full bg-kumo-danger ring-2 ring-kumo-canvas"
             aria-label="Unread"
           />
         ) : null}
@@ -117,9 +179,10 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex h-full w-full flex-col pr-2 pl-1">
-      <div className="flex items-center gap-1 pt-1 pb-2">
-        <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg bg-kumo-fill px-3 text-kumo-subtle focus-within:ring-2 focus-within:ring-kumo-focus">
+    <aside className="flex h-full w-full flex-col border-r border-kumo-line">
+      <div className="col-header">
+        {/* The 28px button sits 4px inside the 36px pill. */}
+        <div className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full bg-(--fill-hover) pr-1 pl-3 text-kumo-subtle focus-within:ring-2 focus-within:ring-kumo-focus">
           <MagnifyingGlassIcon size={16} className="shrink-0" />
           <input
             type="search"
@@ -127,28 +190,28 @@ export function Sidebar() {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search"
             aria-label="Search bots"
-            className="w-full bg-transparent text-sm text-kumo-default outline-none placeholder:text-kumo-placeholder"
+            className="min-w-0 flex-1 bg-transparent text-sm text-kumo-default outline-none placeholder:text-kumo-placeholder"
           />
-        </label>
-        <Tooltip
-          content="New bot"
-          render={
-            <Button
-              variant="ghost"
-              shape="square"
-              icon={<PlusIcon />}
-              aria-label="New bot"
-              onClick={createBot}
-              loading={creating}
-              disabled={!hub.live}
-            />
-          }
-        />
+          <Tooltip
+            content="New bot"
+            render={
+              <button
+                type="button"
+                aria-label="New bot"
+                onClick={() => void createBot()}
+                disabled={!hub.live || creating}
+                className="icon-btn size-7! hover:bg-(--fill-active)!"
+              >
+                {creating ? <Loader size="sm" /> : <PlusIcon size={16} />}
+              </button>
+            }
+          />
+        </div>
       </div>
 
       <nav
         aria-label="Bots"
-        className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto"
+        className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-(--inset) pt-1"
       >
         {bots.map((bot) => (
           <BotRow key={bot.id} bot={bot} active={bot.id === botId} />
@@ -160,35 +223,42 @@ export function Sidebar() {
         ) : null}
       </nav>
 
-      <div className="flex items-center gap-2 py-1.5 pl-2.5">
-        {hub.viewer.avatarUrl ? (
-          <img
-            src={hub.viewer.avatarUrl}
-            alt=""
-            width={24}
-            height={24}
-            className="size-6 rounded-full bg-kumo-fill object-cover"
-          />
-        ) : (
-          <span className="flex size-6 items-center justify-center rounded-full bg-kumo-fill text-[10px] font-medium text-kumo-subtle">
-            {initials(hub.viewer.label)}
-          </span>
-        )}
-        <span className="min-w-0 flex-1 truncate text-sm text-kumo-default">
+      {/* Shares the composer's centre line; the avatar sits in a 40px slot so
+          it centres under the bot avatars above. */}
+      <div className="flex h-(--footer-h) shrink-0 items-center gap-3 pr-(--inset) pl-5">
+        <span className="flex w-10 shrink-0 justify-center">
+          {hub.viewer.avatarUrl ? (
+            <img
+              src={hub.viewer.avatarUrl}
+              alt=""
+              width={28}
+              height={28}
+              className="size-7 rounded-full bg-kumo-fill object-cover outline outline-1 -outline-offset-1 outline-black/10"
+            />
+          ) : (
+            <span className="flex size-7 items-center justify-center rounded-full bg-kumo-fill text-[11px] font-medium text-kumo-subtle">
+              {initials(hub.viewer.label)}
+            </span>
+          )}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-kumo-default">
           {hub.viewer.label}
         </span>
-        <Tooltip
-          content="Connections"
-          render={
-            <Link
-              to="/connections"
-              aria-label="Connections"
-              className="flex size-8 items-center justify-center rounded-lg text-kumo-subtle outline-none hover:bg-kumo-tint hover:text-kumo-default focus-visible:ring-2 focus-visible:ring-kumo-focus"
-            >
-              <GearSixIcon size={18} />
-            </Link>
-          }
-        />
+        <div className="flex items-center gap-1">
+          <NotificationsButton />
+          <Tooltip
+            content="Connections"
+            render={
+              <Link
+                to="/connections"
+                aria-label="Connections"
+                className="icon-btn"
+              >
+                <GearSixIcon size={20} />
+              </Link>
+            }
+          />
+        </div>
       </div>
     </aside>
   )

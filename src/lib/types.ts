@@ -72,6 +72,8 @@ export interface AppTool {
   description: string
   /** JSON Schema for the tool's arguments. */
   inputSchema: Record<string, unknown>
+  /** From the server's `readOnlyHint`, or guessed from the tool name. */
+  readOnly: boolean
 }
 
 export interface AppCatalog {
@@ -133,6 +135,100 @@ export interface Routine {
   kind: "cron" | "once"
 }
 
+/** How a bot works on its own between conversations. */
+export interface ProactiveSettings {
+  /** Regular check-ins: look at apps and open items, speak only if useful. */
+  enabled: boolean
+  everyHours: number
+  /** "HH:mm" in `timezone`. No check-ins or push notifications in between. */
+  quietStart: string
+  quietEnd: string
+  /** IANA zone, set from the user's browser. */
+  timezone: string
+  /** Upper bound on unprompted messages per day. */
+  maxPerDay: number
+  /**
+   * Let background work call app tools that are not known to be read-only
+   * (e.g. Executor's code-running `execute`) when the apps rule is "Ask
+   * first". Off by default: nobody is there to approve.
+   */
+  appsInBackground: boolean
+}
+
+export const CHECK_IN_HOURS = [1, 2, 3, 4, 6, 8, 12, 24] as const
+
+export const DEFAULT_PROACTIVE: ProactiveSettings = {
+  enabled: true,
+  everyHours: 3,
+  quietStart: "22:00",
+  quietEnd: "08:00",
+  timezone: "UTC",
+  maxPerDay: 6,
+  appsInBackground: false,
+}
+
+/** Something the bot is keeping an eye on until it is resolved. */
+export interface OpenItem {
+  id: string
+  title: string
+  /** Latest state, in the bot's words. */
+  note: string
+  sourceUrl?: string
+  createdAt: number
+  updatedAt: number
+  /** When the bot wants to look again, if it said. */
+  checkAfter?: number
+  status: "open" | "resolved"
+}
+
+/** A workflow the bot learned, saved under /workspace/skills. */
+export interface Skill {
+  slug: string
+  name: string
+  description: string
+}
+
+/**
+ * A small web app the bot built from its own data. Files live under
+ * /workspace/apps/<slug>; data lives in the bot's SQLite as collections.
+ */
+export interface BotAppSummary {
+  slug: string
+  name: string
+  description: string
+  /** Bumped on every save, so open copies reload and caches turn over. */
+  version: number
+  updatedAt: number
+}
+
+/** A link that opens an app. The token in the URL is the only credential. */
+export interface AppLink {
+  token: string
+  /** Who it is for, e.g. "Sarah". The owner's own link is "You". */
+  label: string
+  mode: "edit" | "view"
+  owner: boolean
+  createdAt: number
+  /** Path on this host, ending in "/". */
+  path: string
+}
+
+export interface BotAppDetail extends BotAppSummary {
+  hasServer: boolean
+  links: AppLink[]
+  collections: { name: string; count: number }[]
+}
+
+/** URL path of an app, as served by `src/agents/apps-runtime.ts`. */
+export function appPath(
+  userId: string,
+  botId: string,
+  slug: string,
+  token: string
+) {
+  return `/apps/${encodeURIComponent(userId)}/${botId}/${slug}/${token}/`
+}
+
 /** Synced to every client connected to a bot. */
 export interface BotState {
   name: string
@@ -142,14 +238,49 @@ export interface BotState {
   status: BotStatus
   rules: Record<ActionClass, RulePolicy>
   routines: Routine[]
+  proactive: ProactiveSettings
+  skills: Skill[]
+  apps: BotAppSummary[]
+  /** Last time the bot finished background work, for the settings panel. */
+  lastCheckIn?: number
 }
 
-/** Metadata on a user-role message that did not come from the human. */
+/**
+ * Metadata on a user-role message that did not come from the human.
+ * "check-in", "email" and "webhook" turns run in the background: the
+ * thread hides the trigger and shows only what the bot chose to say.
+ */
 export interface MessageOrigin {
-  kind: "bot" | "routine"
-  /** Bot or routine name. */
+  kind: "bot" | "routine" | "check-in" | "email" | "webhook" | "app"
+  /** Bot or routine name, email sender, webhook source, or app name. */
   name: string
   avatar?: BotAvatarKind
+}
+
+/** Fields this app stamps on `UIMessage.metadata`. */
+export interface MessageMeta {
+  origin?: MessageOrigin
+  /** Unix ms. */
+  at?: number
+  /** Part of a turn the user did not start. */
+  background?: boolean
+}
+
+/** A background turn ends with exactly this when there is nothing to say. */
+export const NO_UPDATE = "NO_UPDATE"
+
+/** A browser's Web Push subscription, as `PushSubscription.toJSON()` gives it. */
+export interface PushSubscriptionData {
+  endpoint: string
+  expirationTime: number | null
+  keys: { p256dh: string; auth: string }
+}
+
+/** Where a bot can be reached from outside the app. */
+export interface BotInbound {
+  /** Null when no email domain is configured. */
+  email: string | null
+  webhookUrl: string
 }
 
 export interface ActivityEntry {

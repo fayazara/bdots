@@ -25,6 +25,8 @@ export function BotAvatar({
       size={size}
       state={busy ? "working" : "default"}
       interactive={interactive}
+      // No idle jumps: an idle bot only blinks and looks around.
+      jumpEvery={0}
       // Decorative: the bot's name and status are always in text beside it.
       aria-hidden="true"
       className={className}

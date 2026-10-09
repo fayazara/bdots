@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router"
 import { Button } from "@cloudflare/kumo/components/button"
-import { PlusIcon } from "@phosphor-icons/react"
+import { PlusIcon } from "@/components/icons"
 import { BotAvatar } from "@/components/bot-avatar"
 import { useHub } from "@/lib/hub-context"
 import { getHubSnapshot } from "@/lib/server-fns"
@@ -34,7 +34,7 @@ function Onboarding() {
   }
 
   return (
-    <div className="reveal flex flex-1 flex-col items-center justify-center gap-6 rounded-2xl bg-kumo-base px-6 text-center shadow-xs ring ring-kumo-line">
+    <div className="reveal flex flex-1 flex-col items-center justify-center gap-6 px-6 pb-(--header-h) text-center">
       <div
         className="flex items-end gap-2"
         style={{ "--i": 0 } as React.CSSProperties}
@@ -47,10 +47,10 @@ function Onboarding() {
         className="max-w-md space-y-2"
         style={{ "--i": 1 } as React.CSSProperties}
       >
-        <h1 className="text-2xl font-semibold tracking-tight text-kumo-default">
+        <h1 className="text-2xl font-semibold tracking-tight text-balance text-kumo-default">
           Create your first bot
         </h1>
-        <p className="text-[15px] text-kumo-subtle">
+        <p className="text-[15px] text-pretty text-kumo-subtle">
           A bot is a teammate with its own computer and browser. Tell it what
           the job is and it names itself, remembers how you like things done,
           and keeps working while you're away.

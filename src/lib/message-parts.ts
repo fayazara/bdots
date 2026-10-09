@@ -1,5 +1,6 @@
 import type { UIMessage } from "ai"
-import type { MessageOrigin } from "@/lib/types"
+import { NO_UPDATE } from "@/lib/types"
+import type { MessageMeta, MessageOrigin } from "@/lib/types"
 
 export type ToolCallState = "running" | "waiting" | "done" | "error" | "denied"
 
@@ -97,6 +98,29 @@ export function toBlocks(message: UIMessage): Block[] {
       }
       return
     }
+    if (call.name === "track_item" || call.name === "resolve_item") {
+      if (call.state === "done") {
+        const verb = call.name === "track_item" ? "Keeping an eye on" : "Closed"
+        const what =
+          call.name === "track_item"
+            ? String(call.input.title ?? "")
+            : String(call.input.outcome ?? "")
+        blocks.push({ kind: "event", key, label: `${verb}: ${what}` })
+      }
+      return
+    }
+    if (call.name === "save_skill") {
+      if (call.state === "done") {
+        blocks.push({
+          kind: "event",
+          key,
+          label: `Learned a skill: ${String(call.input.name ?? "")}`,
+        })
+      }
+      return
+    }
+    // Bookkeeping the user does not need to see.
+    if (call.name === "mark_reported" || call.name === "was_reported") return
 
     const last = blocks.at(-1)
     if (COMPUTER_TOOLS.has(call.name)) {
@@ -121,9 +145,21 @@ export function messageText(message: UIMessage) {
     .join("\n")
 }
 
+export function metaOf(message: UIMessage): MessageMeta {
+  return (message.metadata ?? {}) as MessageMeta
+}
+
 export function originOf(message: UIMessage): MessageOrigin | undefined {
-  const metadata = message.metadata as { origin?: MessageOrigin } | undefined
-  return metadata?.origin
+  return metaOf(message).origin
+}
+
+/** A background reply that chose to say nothing (it is pruned soon after). */
+export function isQuietReply(message: UIMessage) {
+  const texts = message.parts.filter((p) => p.type === "text" && p.text.trim())
+  const last = texts.at(-1)
+  if (last?.type !== "text") return false
+  const text = last.text.trim()
+  return text.startsWith(NO_UPDATE) || text.endsWith(NO_UPDATE)
 }
 
 /** Bot and routine messages carry a bracketed first line meant for the model. */
@@ -177,6 +213,24 @@ export function describeCall(call: ToolCall): string {
       return "Cancelled a routine"
     case "search_context":
       return "Searched memory"
+    case "update_item":
+      return "Updated an open item"
+    case "start_teaching":
+      return "Started watching"
+    case "finish_teaching":
+      return "Stopped watching"
+    case "save_app":
+      return `Published app "${str("name")}"`
+    case "list_apps":
+      return "Checked apps"
+    case "delete_app":
+      return `Deleted app ${str("slug")}`
+    case "app_data_list":
+      return `Read ${str("slug")}/${str("collection")}`
+    case "app_data_put":
+      return `Updated ${str("slug")}/${str("collection")}`
+    case "app_data_delete":
+      return `Removed from ${str("slug")}/${str("collection")}`
     default:
       return mcpLabel(call.name)
   }

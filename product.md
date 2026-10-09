@@ -570,6 +570,7 @@ export default {
 | **M1 MVP (2 weeks)** | Multiple bots (UserHub + BotAgent), sidebar UI, Computer card and take-over modal, AI Gateway, schedules, R2 screenshots, basic rules plus manual approvals, a toolkit per bot in Executor | medium |
 | **M2 (2 weeks)** | More Executor integrations (Calendar, Sheets, Salesforce/HubSpot, GitHub, Slack), a morning email-digest routine, email per bot, Queue event ingestion, **Jev** triage + auto-review + injection guard, memory write-back, container backend | medium |
 | **M3 (2+ weeks)** | Group threads and bot-to-bot delegation, teach-a-task (recording → skill → routine), login vault persistence, voice, Slack | large |
+| **M4 Apps** | Bots build small web apps from their data (itineraries, trackers). Files in the workspace, `server.js` in a Dynamic Worker, collections in bot SQLite, realtime via an `AppLive` DO, sandboxed and served at `/apps/*` with revocable share links. Edits through a link wake the bot. Next: "Publish to Cloudflare" with `cf`, cross-user agents over MCP | medium |
 | **Launch** | Template repo, blog post ("Give every agent a computer and a browser — on isolates"), demo video (Sales Outbound overnight run) | — |
 
 ## 12. Success metrics

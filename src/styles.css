@@ -1,11 +1,18 @@
 @source "../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
 @import "@cloudflare/kumo/styles/tailwind";
 @import "tailwindcss";
-@import "@fontsource-variable/inter";
 
 @layer base {
   html {
-    font-family: "SF Compact", sans-serif;
+    font-family:
+      system-ui,
+      -apple-system,
+      "Segoe UI",
+      Roboto,
+      "Helvetica Neue",
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   html,
@@ -30,6 +37,94 @@
  */
 .btn-ink {
   --color-kumo-brand: var(--color-kumo-contrast);
+}
+
+/*
+ * Softer lines than Kumo's default (10% ink), so cards, dividers and inputs
+ * separate without drawing hard edges. Unlayered, so it wins over the theme.
+ */
+:root {
+  --color-kumo-line: light-dark(oklch(0% 0 0 / 0.06), oklch(100% 0 0 / 0.08));
+
+  /* Translucent fills that read the same on the canvas and on white. */
+  --fill-hover: light-dark(oklch(0% 0 0 / 0.045), oklch(100% 0 0 / 0.07));
+  --fill-active: light-dark(oklch(0% 0 0 / 0.07), oklch(100% 0 0 / 0.11));
+}
+
+/*
+ * Layout grid. Every column (sidebar, chat, side panel) starts with a
+ * --header-h row whose --control-size controls sit --inset from each edge
+ * on all four sides, so the three top rows share one centre line. The
+ * composer row and the sidebar footer are both --footer-h tall and share
+ * the bottom centre line.
+ */
+:root {
+  --header-h: 56px;
+  --control-size: 36px;
+  --inset: 10px;
+  --footer-h: 80px;
+}
+
+@layer components {
+  .col-header {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 8px;
+    height: var(--header-h);
+    padding-inline: var(--inset);
+  }
+
+  /* The one icon button: round, quiet until hovered, tinted when pressed. */
+  .icon-btn {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: var(--control-size);
+    height: var(--control-size);
+    border-radius: 9999px;
+    color: var(--text-color-kumo-subtle);
+    outline: none;
+    transition:
+      background-color 150ms ease,
+      color 150ms ease,
+      transform 160ms ease-out;
+  }
+
+  .icon-btn:hover,
+  .icon-btn[aria-pressed="true"],
+  .icon-btn[aria-expanded="true"] {
+    background-color: var(--fill-hover);
+    color: var(--text-color-kumo-default);
+  }
+
+  .icon-btn[aria-pressed="true"] {
+    background-color: var(--fill-active);
+  }
+
+  .icon-btn:focus-visible {
+    box-shadow: 0 0 0 2px var(--color-kumo-focus);
+  }
+
+  .icon-btn:active {
+    transform: scale(0.96);
+  }
+
+  .icon-btn:disabled {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  /* A filled variant for the composer's + and other primary-ish actions. */
+  .icon-btn.is-filled {
+    background-color: var(--fill-hover);
+    color: var(--text-color-kumo-default);
+  }
+
+  .icon-btn.is-filled:hover {
+    background-color: var(--fill-active);
+  }
 }
 
 /*
@@ -66,6 +161,14 @@
   /* Icon swap (send ↔ stop) */
   --icon-swap-dur: var(--duration-fast);
   --icon-swap-start-scale: 0.25;
+
+  /* Tabs sliding (segmented control) */
+  --tabs-dur: var(--duration-fast);
+  --tabs-ease: var(--ease-smooth-out);
+  --tabs-text-muted: var(--text-color-kumo-subtle);
+  --tabs-text-active: var(--text-color-kumo-default);
+  --tabs-bar-bg: var(--color-kumo-tint);
+  --tabs-pill-bg: var(--color-kumo-base);
 }
 
 /*
@@ -171,6 +274,58 @@
   transform: scale(var(--icon-swap-start-scale));
 }
 
+/* Tabs sliding: the active pill tweens between measured tab positions. */
+.t-tabs {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 48px;
+  background: var(--tabs-bar-bg);
+}
+.t-tab {
+  position: relative;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  height: 30px;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tabs-text-muted);
+  cursor: pointer;
+  border-radius: 48px;
+  outline: none;
+  z-index: 1;
+  transition: color var(--tabs-dur) var(--tabs-ease);
+}
+.t-tab:not([aria-selected="true"]):hover,
+.t-tab[aria-selected="true"] {
+  color: var(--tabs-text-active);
+}
+.t-tab:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-kumo-focus);
+}
+
+.t-tabs-pill {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  height: 30px;
+  width: 0;
+  background: var(--tabs-pill-bg);
+  border-radius: 48px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+  transform: translateX(0);
+  transition:
+    transform var(--tabs-dur) var(--tabs-ease),
+    width var(--tabs-dur) var(--tabs-ease);
+  will-change: transform, width;
+  z-index: 0;
+  pointer-events: none;
+}
+
 /* New messages rise in; history already on screen does not replay. */
 .msg-enter {
   transition:
@@ -236,6 +391,8 @@
   .slide-shell,
   .slide-shell > .slide-content,
   .t-icon-swap .t-icon,
+  .t-tabs-pill,
+  .t-tab,
   .msg-enter,
   .unread-dot,
   .reveal > * {
@@ -251,7 +408,8 @@
     animation: none !important;
   }
 
-  .pressable:active {
+  .pressable:active,
+  .icon-btn:active {
     transform: none;
   }
 }

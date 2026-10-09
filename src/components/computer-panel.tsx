@@ -1,27 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { FileTree, useFileTree } from "@pierre/trees/react"
 import { Button } from "@cloudflare/kumo/components/button"
-import { Empty } from "@cloudflare/kumo/components/empty"
 import { Loader } from "@cloudflare/kumo/components/loader"
-import { Tabs } from "@cloudflare/kumo/components/tabs"
 import {
   ArrowClockwiseIcon,
   CheckIcon,
   GlobeIcon,
+  ListBulletsIcon,
   PowerIcon,
   WarningIcon,
-} from "@phosphor-icons/react"
+} from "@/components/icons"
+import { AppsPane } from "@/components/apps-pane"
 import { LiveViewFrame, useLiveView } from "@/components/computer-card"
+import { EmptyState } from "@/components/empty-state"
+import { SidePanel } from "@/components/side-panel"
+import { SlidingTabs } from "@/components/sliding-tabs"
 import { useBot } from "@/lib/bot-context"
 import type { BotConnection } from "@/lib/bot-context"
 import type { ActivityEntry } from "@/lib/types"
 
-type Pane = "browser" | "terminal" | "files" | "activity"
+type Pane = "browser" | "terminal" | "files" | "apps" | "activity"
 
 const PANES: { value: Pane; label: string }[] = [
   { value: "browser", label: "Browser" },
   { value: "terminal", label: "Terminal" },
   { value: "files", label: "Files" },
+  { value: "apps", label: "Apps" },
   { value: "activity", label: "Activity" },
 ]
 
@@ -51,16 +55,17 @@ function BrowserPane({ agent }: { agent: BotConnection }) {
   }
   if (!tab) {
     return (
-      <div className="flex flex-1 items-center justify-center p-6">
-        <Empty
-          icon={<GlobeIcon size={40} className="text-kumo-inactive" />}
-          title="The browser is asleep"
+      <div className="flex flex-1 items-center justify-center pb-16">
+        <EmptyState
+          icon={<GlobeIcon size={24} />}
+          title="Browser is asleep"
           description={
-            error ??
-            "A Chromium session starts when the bot needs to sign in or click through a site, and closes after a few idle minutes."
+            error ?? "It wakes up when the bot needs to visit a site."
           }
-          contents={
+          action={
             <Button
+              size="sm"
+              variant="ghost"
               icon={<ArrowClockwiseIcon />}
               onClick={() => void refresh()}
             >
@@ -72,7 +77,7 @@ function BrowserPane({ agent }: { agent: BotConnection }) {
     )
   }
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-2 px-4 pt-2 pb-4">
       <div className="flex items-center gap-2">
         <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
           {tabs.map((t, i) => (
@@ -81,36 +86,36 @@ function BrowserPane({ agent }: { agent: BotConnection }) {
               type="button"
               onClick={() => setIndex(i)}
               aria-pressed={t === tab}
-              className={`max-w-56 truncate rounded-lg px-3 py-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-kumo-focus ${
+              className={`h-8 max-w-56 truncate rounded-full px-3 text-xs outline-none focus-visible:ring-2 focus-visible:ring-kumo-focus ${
                 t === tab
-                  ? "bg-kumo-fill text-kumo-default"
-                  : "text-kumo-subtle hover:bg-kumo-tint"
+                  ? "bg-(--fill-active) text-kumo-default"
+                  : "text-kumo-subtle hover:bg-(--fill-hover)"
               }`}
             >
               {t.title || t.pageUrl || "New tab"}
             </button>
           ))}
         </div>
-        <Button
-          size="sm"
-          variant="ghost"
-          shape="square"
-          icon={<ArrowClockwiseIcon />}
+        <button
+          type="button"
           aria-label="Refresh live view"
           onClick={() => void refresh()}
-        />
-        <Button
-          size="sm"
-          variant="ghost"
-          shape="square"
-          icon={<PowerIcon />}
+          className="icon-btn size-8!"
+        >
+          <ArrowClockwiseIcon size={16} />
+        </button>
+        <button
+          type="button"
           aria-label="Close browser session"
-          loading={closing}
+          disabled={closing}
           onClick={() => void close()}
-        />
+          className="icon-btn size-8!"
+        >
+          {closing ? <Loader size="sm" /> : <PowerIcon size={16} />}
+        </button>
       </div>
-      <p className="truncate text-xs text-kumo-subtle">{tab.pageUrl}</p>
-      <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-kumo-line">
+      <p className="truncate px-1 text-xs text-kumo-subtle">{tab.pageUrl}</p>
+      <div className="min-h-0 flex-1 overflow-hidden rounded-xl bg-white outline outline-1 -outline-offset-1 outline-black/[0.06]">
         <LiveViewFrame tab={tab} interactive className="h-full" />
       </div>
     </div>
@@ -180,7 +185,7 @@ function TerminalPane({ agent }: { agent: BotConnection }) {
   }
 
   return (
-    <div className="mx-4 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-kumo-contrast font-mono text-[13px] text-kumo-inverse">
+    <div className="mx-4 mt-2 mb-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-kumo-contrast font-mono text-[13px] text-kumo-inverse">
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {lines.length === 0 ? (
           <p className="opacity-60">
@@ -303,20 +308,20 @@ function FilesPane({ agent }: { agent: BotConnection }) {
   }, [refresh])
 
   return (
-    <div className="flex min-h-0 flex-1">
+    <div className="mx-4 mt-2 mb-4 flex min-h-0 flex-1 overflow-hidden rounded-xl bg-kumo-base outline outline-1 -outline-offset-1 outline-black/[0.06]">
       <div className="flex w-60 shrink-0 flex-col border-r border-kumo-line">
-        <div className="flex items-center justify-between py-1 pr-2 pl-4">
+        <div className="flex h-10 items-center justify-between pr-1 pl-4">
           <span className="text-xs font-medium text-kumo-subtle">
             {WORKSPACE_ROOT}
           </span>
-          <Button
-            size="xs"
-            variant="ghost"
-            shape="square"
-            icon={<ArrowClockwiseIcon />}
+          <button
+            type="button"
             aria-label="Refresh files"
             onClick={() => void refresh()}
-          />
+            className="icon-btn size-8!"
+          >
+            <ArrowClockwiseIcon size={16} />
+          </button>
         </div>
         {loaded ? null : (
           <div className="flex justify-center py-6">
@@ -327,12 +332,12 @@ function FilesPane({ agent }: { agent: BotConnection }) {
       </div>
       <div className="min-w-0 flex-1 overflow-auto">
         {selected === null ? (
-          <p className="p-6 text-sm text-kumo-subtle">
+          <p className="p-4 text-sm text-pretty text-kumo-subtle">
             Pick a file to preview it. Drafts, downloads and finished work all
             live here.
           </p>
         ) : error ? (
-          <p role="alert" className="p-6 text-sm text-kumo-danger">
+          <p role="alert" className="p-4 text-sm text-kumo-danger">
             {error}
           </p>
         ) : preview === null ? (
@@ -341,7 +346,7 @@ function FilesPane({ agent }: { agent: BotConnection }) {
           </div>
         ) : (
           <>
-            <p className="sticky top-0 border-b border-kumo-line bg-kumo-canvas px-4 py-2 text-xs text-kumo-subtle">
+            <p className="sticky top-0 flex h-10 items-center border-b border-kumo-line bg-kumo-base px-4 text-xs text-kumo-subtle">
               {WORKSPACE_ROOT}/{selected}
               {preview.truncated ? " · truncated" : ""}
             </p>
@@ -378,34 +383,36 @@ function ActivityPane({ agent }: { agent: BotConnection }) {
   }
   if (entries.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center p-6">
-        <Empty
-          title="Nothing yet"
-          description="Every tool call this bot makes is logged here."
+      <div className="flex flex-1 items-center justify-center pb-16">
+        <EmptyState
+          icon={<ListBulletsIcon size={24} />}
+          title="No activity yet"
+          description="Every tool call this bot makes shows up here."
         />
       </div>
     )
   }
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="flex justify-end px-3 pt-2">
-        <Button
-          size="xs"
-          variant="ghost"
-          icon={<ArrowClockwiseIcon />}
+      <div className="flex items-center justify-between pt-2 pr-2 pl-4">
+        <span className="text-xs text-kumo-subtle">Recent tool calls</span>
+        <button
+          type="button"
+          aria-label="Refresh activity"
           onClick={() => void load()}
+          className="icon-btn size-8!"
         >
-          Refresh
-        </Button>
+          <ArrowClockwiseIcon size={16} />
+        </button>
       </div>
-      <ul className="divide-y divide-kumo-line">
+      <ul className="px-1 pb-4">
         {entries.map((entry) => (
           <li key={entry.id}>
             <button
               type="button"
               onClick={() => setOpen(open === entry.id ? null : entry.id)}
               aria-expanded={open === entry.id}
-              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm outline-none hover:bg-kumo-tint focus-visible:ring-2 focus-visible:ring-kumo-focus focus-visible:ring-inset"
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm outline-none hover:bg-kumo-tint focus-visible:ring-2 focus-visible:ring-kumo-focus"
             >
               {entry.ok ? (
                 <CheckIcon size={14} className="shrink-0 text-kumo-success" />
@@ -426,7 +433,7 @@ function ActivityPane({ agent }: { agent: BotConnection }) {
               </span>
             </button>
             {open === entry.id ? (
-              <pre className="mx-4 mb-3 max-h-64 overflow-auto rounded-lg bg-kumo-fill p-3 font-mono text-xs break-words whitespace-pre-wrap text-kumo-default">
+              <pre className="mx-3 mt-1 mb-2 max-h-64 overflow-auto rounded-lg bg-kumo-fill p-3 font-mono text-xs break-words whitespace-pre-wrap text-kumo-default">
                 {entry.detail || "(no output)"}
               </pre>
             ) : null}
@@ -439,20 +446,16 @@ function ActivityPane({ agent }: { agent: BotConnection }) {
 
 /** The bot's computer: its browser, shell, files and an audit log. */
 export function ComputerPanel() {
-  const { agent } = useBot()
+  const { agent, state } = useBot()
   const [pane, setPane] = useState<Pane>("browser")
 
   return (
-    <>
-      <div className="px-4 pb-3">
-        <Tabs
-          variant="segmented"
-          size="sm"
-          tabs={PANES}
-          value={pane}
-          onValueChange={(value) => setPane(value as Pane)}
-        />
-      </div>
+    <SidePanel
+      title={`${state.name}'s computer`}
+      toolbar={
+        <SlidingTabs tabs={PANES} value={pane} onValueChange={setPane} />
+      }
+    >
       {agent === null ? (
         <div className="flex flex-1 items-center justify-center">
           <Loader />
@@ -463,9 +466,11 @@ export function ComputerPanel() {
         <TerminalPane agent={agent} />
       ) : pane === "files" ? (
         <FilesPane agent={agent} />
+      ) : pane === "apps" ? (
+        <AppsPane agent={agent} />
       ) : (
         <ActivityPane agent={agent} />
       )}
-    </>
+    </SidePanel>
   )
 }

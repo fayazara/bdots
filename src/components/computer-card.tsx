@@ -3,7 +3,7 @@ import { Badge } from "@cloudflare/kumo/components/badge"
 import { Button } from "@cloudflare/kumo/components/button"
 import { Dialog } from "@cloudflare/kumo/components/dialog"
 import { Loader } from "@cloudflare/kumo/components/loader"
-import { ArrowClockwiseIcon, MonitorIcon } from "@phosphor-icons/react"
+import { ArrowClockwiseIcon, MonitorIcon } from "@/components/icons"
 import type { ToolCall } from "@/lib/message-parts"
 
 export interface LiveTab {
@@ -146,7 +146,7 @@ export function ComputerCard({
   }
 
   return (
-    <div className="w-full max-w-[640px] rounded-3xl bg-kumo-tint p-5">
+    <div className="w-full max-w-[640px] rounded-3xl bg-kumo-tint p-4">
       <div className="flex items-center justify-between gap-3">
         <span className="text-[15px] font-semibold text-kumo-default">
           Computer
@@ -158,7 +158,7 @@ export function ComputerCard({
       {/* A finished card only keeps its preview while the browser is still
           open; otherwise it collapses to its header. */}
       {showPreview && (status !== "done" || tab) ? (
-        <div className="mt-4 overflow-hidden rounded-2xl border border-kumo-line bg-kumo-recessed">
+        <div className="mt-3 overflow-hidden rounded-lg bg-kumo-recessed outline outline-1 -outline-offset-1 outline-black/[0.06]">
           {tab ? (
             <LiveViewFrame tab={tab} className="aspect-[16/10]" />
           ) : (
@@ -189,7 +189,7 @@ export function ComputerCard({
       ) : null}
 
       {status === "action_needed" && onApproval ? (
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap gap-2">
           <Button
             variant="primary"
             className="btn-ink rounded-full"

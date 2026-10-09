@@ -19,7 +19,7 @@ function Shell() {
       <SlideShell open={sidebarOpen} side="left">
         <Sidebar />
       </SlideShell>
-      <main className="flex min-w-0 flex-1">
+      <main className="flex min-w-0 flex-1 bg-kumo-base">
         <Outlet />
       </main>
     </div>

@@ -1,12 +1,17 @@
 import { useRef, useState } from "react"
 import { Button } from "@cloudflare/kumo/components/button"
+import { DropdownMenu } from "@cloudflare/kumo/components/dropdown"
+import { Loader } from "@cloudflare/kumo/components/loader"
 import {
   ArrowUpIcon,
+  ChalkboardTeacherIcon,
   PaperclipIcon,
   PlusIcon,
   StopIcon,
   XIcon,
-} from "@phosphor-icons/react"
+} from "@/components/icons"
+
+const TEACH_PROMPT = "I want to show you how to "
 
 interface ComposerProps {
   botName: string
@@ -66,18 +71,18 @@ export function Composer({
   }
 
   return (
-    <div className="mx-auto w-full max-w-[860px] px-6 pb-4">
+    <div className="mx-auto w-full max-w-[820px] px-6 pb-4">
       {error ? (
-        <p role="alert" className="mb-2 px-2 text-sm text-kumo-danger">
+        <p role="alert" className="mb-2 px-1.5 text-sm text-kumo-danger">
           {error}
         </p>
       ) : null}
       {attached.length > 0 ? (
-        <ul className="mb-2 flex flex-wrap gap-2 px-1">
+        <ul className="mb-2 flex flex-wrap gap-2 px-1.5">
           {attached.map((path) => (
             <li
               key={path}
-              className="flex items-center gap-1.5 rounded-full bg-kumo-fill py-1 pr-1.5 pl-3 text-xs text-kumo-default"
+              className="flex items-center gap-1.5 rounded-full bg-(--fill-hover) py-1 pr-1 pl-3 text-xs text-kumo-default"
             >
               <PaperclipIcon size={12} />
               {path.split("/").at(-1)}
@@ -87,7 +92,7 @@ export function Composer({
                 onClick={() =>
                   setAttached((prev) => prev.filter((p) => p !== path))
                 }
-                className="rounded-full p-0.5 outline-none hover:bg-kumo-tint focus-visible:ring-2 focus-visible:ring-kumo-focus"
+                className="rounded-full p-0.5 outline-none hover:bg-(--fill-active) focus-visible:ring-2 focus-visible:ring-kumo-focus"
               >
                 <XIcon size={12} />
               </button>
@@ -100,9 +105,10 @@ export function Composer({
           e.preventDefault()
           submit()
         }}
-        // The buttons and a one-line textarea are both 36px tall, so the 4px
-        // padding is even on every side; extra lines grow upwards.
-        className="flex items-end gap-2 rounded-3xl border border-kumo-line bg-kumo-base p-1 shadow-xs focus-within:ring-2 focus-within:ring-kumo-focus"
+        // 36px buttons and a one-line textarea sit 6px inside a 48px pill
+        // (24px radius = 18px + 6px). It is 16px off the bottom, so its centre
+        // lines up with the sidebar footer. Extra lines grow upwards.
+        className="flex items-end gap-2 rounded-3xl bg-kumo-base p-1.5 shadow-[0_0_0_1px_var(--color-kumo-line),0_1px_2px_oklch(0_0_0/0.04),0_4px_12px_oklch(0_0_0/0.04)] focus-within:ring-2 focus-within:ring-kumo-focus"
       >
         <input
           ref={fileInput}
@@ -111,16 +117,46 @@ export function Composer({
           hidden
           onChange={(e) => void attach(e.target.files)}
         />
-        <Button
-          type="button"
-          variant="secondary"
-          shape="circle"
-          icon={<PlusIcon />}
-          aria-label="Attach a file"
-          loading={uploading}
-          disabled={disabled || !onAttach}
-          onClick={() => fileInput.current?.click()}
-        />
+        <DropdownMenu>
+          <DropdownMenu.Trigger
+            disabled={disabled}
+            render={(props) => (
+              <button
+                {...props}
+                type="button"
+                aria-label="More"
+                disabled={disabled || uploading}
+                className="icon-btn is-filled"
+              >
+                {uploading ? <Loader size="sm" /> : <PlusIcon size={18} />}
+              </button>
+            )}
+          />
+          <DropdownMenu.Content side="top" align="start">
+            <DropdownMenu.Item
+              icon={<PaperclipIcon />}
+              disabled={!onAttach}
+              onClick={() => fileInput.current?.click()}
+            >
+              Attach a file
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              icon={<ChalkboardTeacherIcon />}
+              onClick={() => {
+                setText(TEACH_PROMPT)
+                // After the menu closes and returns focus to its trigger.
+                requestAnimationFrame(() => {
+                  const el = textarea.current
+                  if (!el) return
+                  el.focus()
+                  el.setSelectionRange(el.value.length, el.value.length)
+                })
+              }}
+            >
+              Teach a task
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu>
         <textarea
           ref={textarea}
           rows={1}
@@ -143,7 +179,7 @@ export function Composer({
               submit()
             }
           }}
-          className="max-h-[200px] flex-1 resize-none bg-transparent px-1 py-1.5 text-[15px] leading-6 text-kumo-default outline-none placeholder:text-kumo-placeholder"
+          className="max-h-[200px] flex-1 resize-none bg-transparent px-1.5 py-1.5 text-[15px] leading-6 text-kumo-default outline-none placeholder:text-kumo-placeholder"
         />
         {/* One button that swaps between send and stop, so the icon can
             cross-fade instead of the whole control popping. */}
@@ -158,7 +194,7 @@ export function Composer({
           icon={
             <span className="t-icon-swap" data-state={stopping ? "b" : "a"}>
               <ArrowUpIcon className="t-icon" data-icon="a" />
-              <StopIcon className="t-icon" data-icon="b" weight="fill" />
+              <StopIcon className="t-icon" data-icon="b" />
             </span>
           }
         />

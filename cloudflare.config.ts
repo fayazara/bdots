@@ -27,6 +27,8 @@ export default defineConfig({
       UserHub: exports.durableObject({ storage: "sqlite" }),
       // One per bot: chat, memory, routines, computer, browser.
       BotAgent: exports.durableObject({ storage: "sqlite" }),
+      // One per app a bot built: live updates to everyone who has it open.
+      AppLive: exports.durableObject({ storage: "sqlite" }),
     },
     env: {
       // Workers AI + AI Gateway for all model traffic. Neither this nor
@@ -44,12 +46,26 @@ export default defineConfig({
         worker: WORKER_NAME,
         exportName: "BotAgent",
       }),
+      AppLive: bindings.durableObject({
+        worker: WORKER_NAME,
+        exportName: "AppLive",
+      }),
       // Main chat model. A "@cf/..." id hits Workers AI; a
       // "<provider>/<model>" slug is routed through AI Gateway.
       MODEL: bindings.text("@cf/deepseek-ai/deepseek-v4-flash-0731"),
       // Optional AI Gateway id. When set, Workers AI calls go through it
       // too (logs, caching, spend limits).
       AI_GATEWAY_ID: bindings.text(""),
+      // Domain with Email Routing that forwards to this Worker (catch-all
+      // or one rule per bot). Each bot gets <user>.<bot>@EMAIL_DOMAIN.
+      // Empty turns inbound email off.
+      EMAIL_DOMAIN: bindings.text(""),
+      // Web Push. Generate a pair with `npx web-push generate-vapid-keys`
+      // and put both keys in .dev.vars / the deploy secrets file. Push
+      // notifications stay off until they are set.
+      VAPID_PUBLIC_KEY: bindings.secret(),
+      VAPID_PRIVATE_KEY: bindings.secret(),
+      VAPID_SUBJECT: bindings.text("mailto:bots@example.com"),
     },
   },
 })

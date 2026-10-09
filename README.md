@@ -59,7 +59,25 @@ pnpm run deploy
 
 Without Cloudflare Access in front of the Worker, every visitor is the same
 `demo` user. Put it behind Access before sharing a deployment. See
-`src/lib/auth.ts`.
+`src/lib/auth.ts`. Add a bypass policy for `/api/hooks/*` and `/apps/*`:
+both authenticate with a token in the URL.
+
+## Apps
+
+A bot can build small web apps from its own data, like a trip itinerary, a
+tracker or a dashboard. Ask it to build one. Each app:
+
+- is a folder in the bot's computer (`/workspace/apps/<slug>/`) with
+  `index.html`, static files, and an optional `server.js` that runs in a
+  Dynamic Worker with no internet access
+- reads and writes collections stored in the bot's SQLite through
+  `window.bdots` (served at `./_bdots.js`), and updates live over a
+  WebSocket (`AppLive` Durable Object)
+- is served at `/apps/<user>/<bot>/<slug>/<token>/` in a CSP sandbox, so its
+  code can't reach the bdots UI
+- can be shared from Computer → Apps with revocable links (edit or view
+  only). When someone edits through a link, the bot gets a background turn
+  telling it who changed what
 
 ## Configuration
 
@@ -89,6 +107,8 @@ src/
     user-hub.ts          # one per user: bot directory, connections, bot-to-bot relay
     bot-agent.ts         # one per bot: Think agent, tools, rules, routines, computer, browser
     prompt.ts            # system prompt
+    app-store.ts         # apps, share links and app data (bot SQLite)
+    apps-runtime.ts      # serves /apps/*, AppLive (realtime), env.BOT for server.js
   routes/
     _app.tsx             # sidebar layout
     _app/bots.$botId.tsx # thread, with computer and settings side panels

@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { Button } from "@cloudflare/kumo/components/button"
-import { Empty } from "@cloudflare/kumo/components/empty"
 import { Input } from "@cloudflare/kumo/components/input"
 import { SensitiveInput } from "@cloudflare/kumo/components/sensitive-input"
-import { PlugsConnectedIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react"
+import { PlugsConnectedIcon, PlusIcon, TrashIcon } from "@/components/icons"
+import { EmptyState } from "@/components/empty-state"
 import { connectionStatus } from "@/lib/connection-status"
 import { useHub } from "@/lib/hub-context"
 import type { Connection } from "@/lib/types"
@@ -84,7 +84,7 @@ function AddConnection() {
   return (
     <form
       onSubmit={(e) => void submit(e)}
-      className="space-y-4 rounded-2xl border border-kumo-line p-5"
+      className="space-y-4 rounded-2xl border border-kumo-line p-4"
     >
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-kumo-default">
@@ -215,7 +215,7 @@ function ConnectionRow({ connection }: { connection: Connection }) {
   }
 
   return (
-    <li className="flex items-center gap-4 px-5 py-4">
+    <li className="flex items-center gap-3 p-4">
       <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-kumo-tint text-kumo-subtle">
         <PlugsConnectedIcon size={20} />
       </span>
@@ -280,13 +280,13 @@ function Connections() {
     if (live) refreshConnections()
   }, [live, refreshConnections])
   return (
-    <div className="min-w-0 flex-1 overflow-y-auto rounded-xl bg-kumo-base shadow-xs ring ring-kumo-line">
-      <div className="mx-auto max-w-3xl space-y-6 px-8 py-10">
+    <div className="min-w-0 flex-1 overflow-y-auto">
+      <div className="mx-auto max-w-[720px] space-y-6 px-6 py-12">
         <header className="space-y-2">
           <h1 className="text-2xl font-semibold tracking-tight text-kumo-default">
             Connections
           </h1>
-          <p className="text-[15px] text-kumo-subtle">
+          <p className="text-[15px] text-pretty text-kumo-subtle">
             Bots reach your apps through their APIs first and only open a
             browser when there is no API. Connect an{" "}
             <a
@@ -313,10 +313,9 @@ function Connections() {
         ) : null}
 
         {hub.state.connections.length === 0 ? (
-          <Empty
-            icon={
-              <PlugsConnectedIcon size={40} className="text-kumo-inactive" />
-            }
+          <EmptyState
+            className="py-8"
+            icon={<PlugsConnectedIcon size={24} />}
             title="No connections yet"
             description="Add one below. Every bot can use every connection, and you only sign in once."
           />

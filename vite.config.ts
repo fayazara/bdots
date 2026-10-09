@@ -10,6 +10,9 @@ const config = defineConfig({
   // `cf dev` does not forward flags like --port to Vite, so set them here.
   server: {
     port: 3000,
+    // Let the Worker answer CORS, as in production. Vite's own middleware
+    // rejects the `null` origin of sandboxed bot apps (/apps/*).
+    cors: false,
   },
   resolve: {
     tsconfigPaths: true,
