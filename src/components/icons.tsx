@@ -11,7 +11,8 @@ import {
   BookOpen01Icon as BookOpen,
   Cancel01Icon as Cancel,
   Clock01Icon as Clock,
-  ComputerIcon as Computer,
+  Copy01Icon as Copy,
+  AiBrowserIcon as AiBrowser,
   Delete02Icon as Delete,
   Globe02Icon as Globe,
   LeftToRightListBulletIcon as ListBullet,
@@ -41,10 +42,21 @@ export type IconProps = Omit<HugeiconsProps, "icon" | "ref">
  * Every icon in the app comes from Hugeicons (rounded strokes to match the
  * rounded UI). Icons default to 1em so they follow the surrounding text and
  * Kumo's button sizing.
+ *
+ * Strokes are a true 1.5px on screen at every size (see `.hi` in
+ * styles.css). Hugeicons draw 1.5 on a 24px grid, so a 16px icon would
+ * otherwise get a 1px hairline and a 20px one 1.25px.
  */
 function icon(svg: IconSvgElement, name: string) {
-  function Icon({ size = "1em", ...props }: IconProps) {
-    return <HugeiconsIcon icon={svg} size={size} {...props} />
+  function Icon({ size = "1em", className = "", ...props }: IconProps) {
+    return (
+      <HugeiconsIcon
+        icon={svg}
+        size={size}
+        className={`hi ${className}`}
+        {...props}
+      />
+    )
   }
   Icon.displayName = name
   return Icon
@@ -65,13 +77,14 @@ export const CaretRightIcon = icon(ChevronRight, "CaretRightIcon")
 export const ChalkboardTeacherIcon = icon(Teaching, "ChalkboardTeacherIcon")
 export const CheckIcon = icon(Tick, "CheckIcon")
 export const ClockIcon = icon(Clock, "ClockIcon")
+export const CopyIcon = icon(Copy, "CopyIcon")
 export const EnvelopeSimpleIcon = icon(Mail, "EnvelopeSimpleIcon")
 export const EyeIcon = icon(View, "EyeIcon")
 export const GearSixIcon = icon(Settings, "GearSixIcon")
 export const GlobeIcon = icon(Globe, "GlobeIcon")
 export const ListBulletsIcon = icon(ListBullet, "ListBulletsIcon")
 export const MagnifyingGlassIcon = icon(Search, "MagnifyingGlassIcon")
-export const MonitorIcon = icon(Computer, "MonitorIcon")
+export const ComputerIcon = icon(AiBrowser, "ComputerIcon")
 export const PaperclipIcon = icon(Attachment, "PaperclipIcon")
 export const PlugsConnectedIcon = icon(Plug, "PlugsConnectedIcon")
 export const PlusIcon = icon(Add, "PlusIcon")

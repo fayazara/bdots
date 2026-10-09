@@ -2,6 +2,12 @@
 @import "@cloudflare/kumo/styles/tailwind";
 @import "tailwindcss";
 
+/*
+ * `dark:` follows the app's mode (Kumo's data-mode), not the OS. The app is
+ * light, so without this a dark-mode Mac gets dark switches on a light page.
+ */
+@custom-variant dark (&:where([data-mode="dark"], [data-mode="dark"] *));
+
 @layer base {
   html {
     font-family:
@@ -20,6 +26,12 @@
     height: 100%;
     overscroll-behavior: none;
   }
+}
+
+/* Hugeicons: a 1.5px stroke on screen whatever the icon's size. */
+.hi [stroke-width] {
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
 }
 
 /* Markdown inside chat bubbles: tighter than Streamdown's document defaults. */

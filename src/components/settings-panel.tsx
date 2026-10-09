@@ -1,19 +1,23 @@
 import { useEffect, useState } from "react"
 import { Link, useHydrated, useNavigate } from "@tanstack/react-router"
-import { Badge } from "@cloudflare/kumo/components/badge"
 import { Button } from "@cloudflare/kumo/components/button"
-import { ClipboardText } from "@cloudflare/kumo/components/clipboard-text"
 import { Dialog } from "@cloudflare/kumo/components/dialog"
-import { Input, InputArea } from "@cloudflare/kumo/components/input"
 import { Loader } from "@cloudflare/kumo/components/loader"
 import { Select } from "@cloudflare/kumo/components/select"
 import { Switch } from "@cloudflare/kumo/components/switch"
+import { Tooltip } from "@cloudflare/kumo/components/tooltip"
+import { CopyButton } from "@/components/copy-button"
+import { EmptyRow, Group, Row } from "@/components/group"
 import {
   ArrowsClockwiseIcon,
   BookOpenTextIcon,
+  CaretRightIcon,
   ClockIcon,
+  EnvelopeSimpleIcon,
   EyeIcon,
+  PlugsConnectedIcon,
   TrashIcon,
+  WebhooksLogoIcon,
   XIcon,
 } from "@/components/icons"
 import { useBot } from "@/lib/bot-context"
@@ -58,25 +62,82 @@ const POLICY_LABELS: Record<RulePolicy, string> = {
   block: "Block",
 }
 
-function Section({
-  title,
-  hint,
+/** Borderless field that sits inside a group row. */
+const FIELD =
+  "w-full bg-transparent text-sm text-kumo-default outline-none placeholder:text-kumo-placeholder"
+
+/** Small pill control for time inputs, matching Kumo's small select. */
+const PILL_INPUT =
+  "h-8 rounded-lg bg-(--fill-hover) px-2.5 text-sm text-kumo-default tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-kumo-focus disabled:opacity-50"
+
+/** Round icon button for row actions. */
+function RowAction({
+  label,
+  onClick,
+  disabled,
+  danger,
   children,
 }: {
-  title: string
-  hint?: string
+  label: string
+  onClick: () => void
+  disabled?: boolean
+  danger?: boolean
   children: React.ReactNode
 }) {
   return (
-    <section className="space-y-3 border-b border-kumo-line p-4 last:border-b-0">
-      <div>
-        <h2 className="text-sm font-semibold text-kumo-default">{title}</h2>
-        {hint ? (
-          <p className="mt-0.5 text-sm text-kumo-subtle">{hint}</p>
-        ) : null}
-      </div>
-      {children}
-    </section>
+    <Tooltip
+      content={label}
+      render={
+        <button
+          type="button"
+          aria-label={label}
+          disabled={disabled}
+          onClick={onClick}
+          className={`icon-btn size-8! ${danger ? "hover:text-kumo-danger!" : ""}`}
+        >
+          {children}
+        </button>
+      }
+    />
+  )
+}
+
+/** Save button that only shows up once there is something to save. */
+function SaveBar({
+  dirty,
+  saving,
+  disabled,
+  onSave,
+  onReset,
+}: {
+  dirty: boolean
+  saving: boolean
+  disabled?: boolean
+  onSave: () => void
+  onReset: () => void
+}) {
+  if (!dirty) return null
+  return (
+    <div className="flex justify-end gap-2 px-1.5">
+      <Button
+        size="sm"
+        variant="ghost"
+        className="rounded-full"
+        onClick={onReset}
+      >
+        Cancel
+      </Button>
+      <Button
+        size="sm"
+        variant="primary"
+        className="btn-ink rounded-full"
+        loading={saving}
+        disabled={disabled}
+        onClick={onSave}
+      >
+        Save
+      </Button>
+    </div>
   )
 }
 
@@ -103,163 +164,44 @@ function Identity() {
   }
 
   return (
-    <Section title="Identity">
-      <Input
-        label="Name"
-        value={name}
-        maxLength={40}
-        onChange={(e) => setName(e.target.value)}
-      />
-      <InputArea
-        label="Job"
-        description="What this bot is for. It sees this on every turn."
-        placeholder="Overnight pipeline generation and outbound. Draft in my voice, never send without asking."
-        value={role}
-        autoResize
-        minRows={3}
-        maxRows={10}
-        onValueChange={setRole}
-      />
-      <Button
-        variant="primary"
-        className="btn-ink"
-        disabled={!dirty || !agent || !name.trim()}
-        loading={saving}
-        onClick={() => void save()}
+    <div className="space-y-2">
+      <Group
+        title="Identity"
+        hint="The job is what this bot is for. It sees it on every turn."
       >
-        Save
-      </Button>
-    </Section>
-  )
-}
-
-function Rules() {
-  const { state, agent } = useBot()
-  return (
-    <Section
-      title="Rules"
-      hint="What this bot may do. “Ask first” pauses the work and shows an approval card. In background work nobody can approve, so those actions are skipped and reported instead; read-only app tools still run."
-    >
-      <ul className="space-y-3">
-        {ACTION_CLASSES.map((cls) => (
-          <li key={cls.id} className="flex items-center justify-between gap-4">
-            <div className="min-w-0">
-              <p className="text-sm text-kumo-default">{cls.label}</p>
-              <p className="text-xs text-kumo-subtle">{cls.hint}</p>
-            </div>
-            <Select
-              aria-label={`${cls.label} rule`}
-              size="sm"
-              className="w-32 shrink-0"
-              disabled={!agent}
-              value={state.rules[cls.id]}
-              items={POLICY_LABELS}
-              onValueChange={(value) => {
-                if (!value) return
-                const rules = { [cls.id]: value } as Partial<
-                  Record<ActionClass, RulePolicy>
-                >
-                void agent?.stub.updateSettings({ rules })
-              }}
-            />
-          </li>
-        ))}
-      </ul>
-    </Section>
-  )
-}
-
-function Toolkit() {
-  const hub = useHub()
-  return (
-    <Section
-      title="Connected apps"
-      hint="Every bot can use all of your connections. Bots reach apps through their APIs first and only open a browser when there is no API."
-    >
-      {hub.state.connections.length === 0 ? (
-        <p className="text-sm text-kumo-subtle">
-          No connections yet.{" "}
-          <Link to="/connections" className="text-kumo-link underline">
-            Add one
-          </Link>
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {hub.state.connections.map((connection) => (
-            <li
-              key={connection.id}
-              className="flex items-center justify-between gap-3"
-            >
-              <span className="truncate text-sm text-kumo-default">
-                {connection.name}
-              </span>
-              <span
-                className={`shrink-0 text-xs ${
-                  connection.status === "ready"
-                    ? "text-kumo-subtle"
-                    : "text-kumo-warning"
-                }`}
-              >
-                {connectionStatus(connection)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <Link to="/connections" className="text-sm text-kumo-link underline">
-        Manage connections
-      </Link>
-    </Section>
-  )
-}
-
-function Routines() {
-  const { state, agent } = useBot()
-  return (
-    <Section
-      title="Routines"
-      hint="Work this bot does on a schedule. Ask it in chat to set one up, like “every weekday at 8am, tell me what needs my attention.”"
-    >
-      {state.routines.length === 0 ? (
-        <p className="text-sm text-kumo-subtle">No routines yet.</p>
-      ) : (
-        <ul className="space-y-2">
-          {state.routines.map((routine) => (
-            <li
-              key={routine.id}
-              className="flex items-start gap-3 rounded-xl bg-(--fill-hover) p-3"
-            >
-              <ClockIcon
-                size={16}
-                className="mt-0.5 shrink-0 text-kumo-subtle"
-              />
-              <div className="min-w-0 flex-1">
-                <p className="flex items-center gap-2 text-sm font-medium text-kumo-default">
-                  <span className="truncate">{routine.name}</span>
-                  <Badge variant="neutral">
-                    {routine.kind === "cron"
-                      ? routine.when
-                      : new Date(routine.when).toLocaleString()}
-                  </Badge>
-                </p>
-                <p className="mt-1 line-clamp-2 text-xs text-kumo-subtle">
-                  {routine.prompt}
-                </p>
-              </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                shape="square"
-                icon={<TrashIcon />}
-                aria-label={`Delete routine ${routine.name}`}
-                disabled={!agent}
-                onClick={() => void agent?.stub.deleteRoutine(routine.id)}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-    </Section>
+        <Row label="Name">
+          <input
+            value={name}
+            maxLength={40}
+            aria-label="Name"
+            onChange={(e) => setName(e.target.value)}
+            className={`${FIELD} h-8 max-w-[60%] text-right`}
+          />
+        </Row>
+        <li className="border-t border-kumo-line px-4 py-3">
+          <label className="block text-sm text-kumo-default" htmlFor="bot-job">
+            Job
+          </label>
+          <textarea
+            id="bot-job"
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            placeholder="Overnight pipeline generation and outbound. Draft in my voice, never send without asking."
+            className={`${FIELD} mt-1.5 field-sizing-content min-h-16 resize-none leading-6 text-pretty`}
+          />
+        </li>
+      </Group>
+      <SaveBar
+        dirty={dirty}
+        saving={saving}
+        disabled={!agent || !name.trim()}
+        onSave={() => void save()}
+        onReset={() => {
+          setName(state.name)
+          setRole(state.role)
+        }}
+      />
+    </div>
   )
 }
 
@@ -282,20 +224,23 @@ function OnItsOwn() {
   }
 
   return (
-    <Section
+    <Group
       title="On its own"
-      hint="Between conversations this bot checks your apps and its open items with read-only tools, and messages you only when something needs you."
+      hint={`Between chats it checks your apps and open items with read-only tools and only messages you when something needs you. Quiet hours follow ${p.timezone}; emails and webhooks still get handled.`}
     >
-      <Switch
-        label="Check in regularly"
-        checked={p.enabled}
-        disabled={!agent}
-        onCheckedChange={(enabled) => update({ enabled })}
-      />
-      <div className="grid grid-cols-2 gap-3">
+      <Row label="Check in regularly">
+        <Switch
+          aria-label="Check in regularly"
+          checked={p.enabled}
+          disabled={!agent}
+          onCheckedChange={(enabled) => update({ enabled })}
+        />
+      </Row>
+      <Row label="How often">
         <Select
-          label="How often"
+          aria-label="How often"
           size="sm"
+          className="w-36 shrink-0"
           disabled={!agent || !p.enabled}
           value={String(p.everyHours)}
           items={CHECK_IN_LABELS}
@@ -303,9 +248,12 @@ function OnItsOwn() {
             value && update({ everyHours: Number(value) })
           }
         />
+      </Row>
+      <Row label="Messages at most">
         <Select
-          label="At most"
+          aria-label="Messages at most"
           size="sm"
+          className="w-36 shrink-0"
           disabled={!agent}
           value={String(p.maxPerDay)}
           items={
@@ -317,46 +265,55 @@ function OnItsOwn() {
             value && update({ maxPerDay: Number(value) })
           }
         />
-        <Input
-          label="Quiet from"
-          type="time"
-          size="sm"
-          disabled={!agent}
-          value={p.quietStart}
-          onChange={(e) =>
-            e.target.value && update({ quietStart: e.target.value })
-          }
-        />
-        <Input
-          label="Until"
-          type="time"
-          size="sm"
-          disabled={!agent}
-          value={p.quietEnd}
-          onChange={(e) =>
-            e.target.value && update({ quietEnd: e.target.value })
-          }
-        />
-      </div>
-      <p className="text-xs text-kumo-subtle">
-        No check-ins or notifications during quiet hours ({p.timezone}). Emails
-        and webhooks still get handled.
-      </p>
-      <Switch
-        label="Use any app tool in the background"
-        labelTooltip="Background work normally only runs app tools known to be read-only. Tools like Executor's code runner can't be checked, so they need your approval, which nobody can give in the background. Turn this on to let them run unattended. The bot is still told to stay read-only."
-        checked={p.appsInBackground === true}
-        disabled={!agent}
-        onCheckedChange={(appsInBackground) => update({ appsInBackground })}
-      />
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-sm text-kumo-subtle">
-          {hydrated && state.lastCheckIn
-            ? `Last worked on its own ${formatAgo(state.lastCheckIn)}`
-            : "Hasn't worked on its own yet"}
+      </Row>
+      <Row label="Quiet hours">
+        <span className="flex shrink-0 items-center gap-1.5 text-sm text-kumo-subtle">
+          <input
+            type="time"
+            aria-label="Quiet from"
+            disabled={!agent}
+            value={p.quietStart}
+            onChange={(e) =>
+              e.target.value && update({ quietStart: e.target.value })
+            }
+            className={PILL_INPUT}
+          />
+          to
+          <input
+            type="time"
+            aria-label="Quiet until"
+            disabled={!agent}
+            value={p.quietEnd}
+            onChange={(e) =>
+              e.target.value && update({ quietEnd: e.target.value })
+            }
+            className={PILL_INPUT}
+          />
         </span>
+      </Row>
+      <Row
+        label="Use any app tool in the background"
+        detail="Lets tools that can't be checked as read-only, like Executor's code runner, run unattended. The bot is still told to stay read-only."
+      >
+        <Switch
+          aria-label="Use any app tool in the background"
+          checked={p.appsInBackground === true}
+          disabled={!agent}
+          onCheckedChange={(appsInBackground) => update({ appsInBackground })}
+        />
+      </Row>
+      <Row
+        label="Last check-in"
+        detail={
+          hydrated && state.lastCheckIn
+            ? formatAgo(state.lastCheckIn)
+            : "Not yet"
+        }
+      >
         <Button
           size="sm"
+          variant="secondary"
+          className="rounded-full"
           icon={<ArrowsClockwiseIcon />}
           loading={checking}
           disabled={!agent || state.status !== "idle"}
@@ -364,8 +321,8 @@ function OnItsOwn() {
         >
           Check in now
         </Button>
-      </div>
-    </Section>
+      </Row>
+    </Group>
   )
 }
 
@@ -395,71 +352,177 @@ function OpenItems() {
   }
 
   return (
-    <Section
+    <Group
       title="Keeping an eye on"
-      hint="Things this bot is waiting on or following up. It looks at these on every check-in."
+      hint={
+        resolved.length > 0 ? (
+          <details>
+            <summary className="cursor-pointer">
+              Things it's waiting on or following up, checked on every
+              check-in. {resolved.length} closed recently.
+            </summary>
+            <ul className="mt-2 space-y-1">
+              {resolved.map((item) => (
+                <li key={item.id}>
+                  <span className="text-kumo-default">{item.title}</span>
+                  {item.note ? ` · ${item.note}` : null}
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : (
+          "Things it's waiting on or following up, checked on every check-in."
+        )
+      }
     >
       {items === null ? (
-        <Loader size="sm" />
+        <EmptyRow>
+          <Loader size="sm" />
+        </EmptyRow>
       ) : open.length === 0 ? (
-        <p className="text-sm text-kumo-subtle">Nothing open.</p>
+        <EmptyRow>Nothing open</EmptyRow>
       ) : (
-        <ul className="space-y-2">
-          {open.map((item) => (
-            <li
-              key={item.id}
-              className="flex items-start gap-3 rounded-xl bg-(--fill-hover) p-3"
+        open.map((item) => (
+          <Row
+            key={item.id}
+            icon={<EyeIcon size={14} />}
+            label={
+              item.sourceUrl ? (
+                <a
+                  href={item.sourceUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="hover:underline"
+                >
+                  {item.title}
+                </a>
+              ) : (
+                item.title
+              )
+            }
+            detail={item.note ? <span className="line-clamp-2">{item.note}</span> : undefined}
+          >
+            <RowAction
+              label={`Stop tracking ${item.title}`}
+              onClick={() => void dismiss(item.id)}
             >
-              <EyeIcon size={16} className="mt-0.5 shrink-0 text-kumo-subtle" />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-kumo-default">
-                  {item.sourceUrl ? (
-                    <a
-                      href={item.sourceUrl}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="underline"
-                    >
-                      {item.title}
-                    </a>
-                  ) : (
-                    item.title
-                  )}
-                </p>
-                {item.note ? (
-                  <p className="mt-1 line-clamp-3 text-xs text-kumo-subtle">
-                    {item.note}
-                  </p>
-                ) : null}
-              </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                shape="square"
-                icon={<XIcon />}
-                aria-label={`Stop tracking ${item.title}`}
-                onClick={() => void dismiss(item.id)}
-              />
-            </li>
-          ))}
-        </ul>
+              <XIcon size={16} />
+            </RowAction>
+          </Row>
+        ))
       )}
-      {resolved.length > 0 ? (
-        <details className="text-sm">
-          <summary className="cursor-pointer text-kumo-subtle">
-            {resolved.length} closed recently
-          </summary>
-          <ul className="mt-2 space-y-1.5">
-            {resolved.map((item) => (
-              <li key={item.id} className="text-xs text-kumo-subtle">
-                <span className="text-kumo-default">{item.title}</span>
-                {item.note ? ` · ${item.note}` : null}
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
-    </Section>
+    </Group>
+  )
+}
+
+function Rules() {
+  const { state, agent } = useBot()
+  return (
+    <Group
+      title="Rules"
+      hint="“Ask first” pauses the work and shows an approval card. In background work nobody can approve, so those actions are skipped and reported instead."
+    >
+      {ACTION_CLASSES.map((cls) => (
+        <Row key={cls.id} label={cls.label} detail={cls.hint}>
+          <Select
+            aria-label={`${cls.label} rule`}
+            size="sm"
+            className="w-32 shrink-0"
+            disabled={!agent}
+            value={state.rules[cls.id]}
+            items={POLICY_LABELS}
+            onValueChange={(value) => {
+              if (!value) return
+              const rules = { [cls.id]: value } as Partial<
+                Record<ActionClass, RulePolicy>
+              >
+              void agent?.stub.updateSettings({ rules })
+            }}
+          />
+        </Row>
+      ))}
+    </Group>
+  )
+}
+
+function Toolkit() {
+  const hub = useHub()
+  return (
+    <Group
+      title="Connected apps"
+      hint="Every bot can use all of your connections, through their APIs first and a browser only when there is no API."
+    >
+      {hub.state.connections.map((connection) => (
+        <Row
+          key={connection.id}
+          icon={<PlugsConnectedIcon size={14} />}
+          label={connection.name}
+        >
+          <span
+            className={`shrink-0 pr-1 text-xs ${
+              connection.status === "ready"
+                ? "text-kumo-subtle"
+                : "text-kumo-warning"
+            }`}
+          >
+            {connectionStatus(connection)}
+          </span>
+        </Row>
+      ))}
+      <li className="border-t border-kumo-line first:border-t-0">
+        <Link
+          to="/connections"
+          className="flex min-h-14 items-center justify-between gap-4 py-3 pr-5 pl-4 text-sm text-kumo-default outline-none hover:bg-(--fill-hover) focus-visible:bg-(--fill-hover)"
+        >
+          {hub.state.connections.length === 0
+            ? "Connect an app"
+            : "Manage connections"}
+          <CaretRightIcon size={14} className="text-kumo-subtle" />
+        </Link>
+      </li>
+    </Group>
+  )
+}
+
+function Routines() {
+  const { state, agent } = useBot()
+  return (
+    <Group
+      title="Routines"
+      hint="Work it does on a schedule. Ask in chat to set one up, like “every weekday at 8am, tell me what needs my attention.”"
+    >
+      {state.routines.length === 0 ? (
+        <EmptyRow>No routines yet</EmptyRow>
+      ) : (
+        state.routines.map((routine) => (
+          <Row
+            key={routine.id}
+            icon={<ClockIcon size={14} />}
+            label={routine.name}
+            detail={
+              <span className="line-clamp-2">
+                <span className="tabular-nums">
+                  {routine.kind === "cron"
+                    ? routine.when
+                    : new Date(routine.when).toLocaleString()}
+                </span>
+                {" · "}
+                {routine.prompt}
+              </span>
+            }
+          >
+            <RowAction
+              label={`Delete routine ${routine.name}`}
+              disabled={!agent}
+              danger
+              onClick={() => void agent?.stub.deleteRoutine(routine.id)}
+            >
+              <TrashIcon size={16} />
+            </RowAction>
+          </Row>
+        ))
+      )}
+    </Group>
   )
 }
 
@@ -467,45 +530,32 @@ function Skills() {
   const { state, agent } = useBot()
   const skills = state.skills ?? []
   return (
-    <Section
+    <Group
       title="Skills"
-      hint="Workflows this bot learned by watching you. Choose “Teach a task” from the + menu in the composer to show it a new one."
+      hint="Workflows it learned by watching you. Pick “Teach a task” from the composer's + menu to show it a new one."
     >
       {skills.length === 0 ? (
-        <p className="text-sm text-kumo-subtle">No skills yet.</p>
+        <EmptyRow>No skills yet</EmptyRow>
       ) : (
-        <ul className="space-y-2">
-          {skills.map((skill) => (
-            <li
-              key={skill.slug}
-              className="flex items-start gap-3 rounded-xl bg-(--fill-hover) p-3"
+        skills.map((skill) => (
+          <Row
+            key={skill.slug}
+            icon={<BookOpenTextIcon size={14} />}
+            label={skill.name}
+            detail={<span className="line-clamp-2">{skill.description}</span>}
+          >
+            <RowAction
+              label={`Delete skill ${skill.name}`}
+              disabled={!agent}
+              danger
+              onClick={() => void agent?.stub.deleteSkill(skill.slug)}
             >
-              <BookOpenTextIcon
-                size={16}
-                className="mt-0.5 shrink-0 text-kumo-subtle"
-              />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-kumo-default">
-                  {skill.name}
-                </p>
-                <p className="mt-1 line-clamp-2 text-xs text-kumo-subtle">
-                  {skill.description}
-                </p>
-              </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                shape="square"
-                icon={<TrashIcon />}
-                aria-label={`Delete skill ${skill.name}`}
-                disabled={!agent}
-                onClick={() => void agent?.stub.deleteSkill(skill.slug)}
-              />
-            </li>
-          ))}
-        </ul>
+              <TrashIcon size={16} />
+            </RowAction>
+          </Row>
+        ))
       )}
-    </Section>
+    </Group>
   )
 }
 
@@ -541,50 +591,62 @@ function Reach() {
       : null
 
   return (
-    <Section
+    <Group
       title="Reach this bot"
-      hint="Events wake the bot right away instead of waiting for the next check-in. It works on them in the background and only messages you if they matter."
+      hint="Events wake the bot right away. It works on them in the background and only messages you if they matter. Treat the webhook URL like a password."
     >
       {inbound === null ? (
-        <Loader size="sm" />
+        <EmptyRow>
+          <Loader size="sm" />
+        </EmptyRow>
       ) : (
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <p className="text-sm text-kumo-default">Email</p>
+        <>
+          <Row
+            icon={<EnvelopeSimpleIcon size={14} />}
+            label="Email"
+            detail={
+              inbound.email ? (
+                <span className="block truncate">{inbound.email}</span>
+              ) : (
+                <>
+                  Set <code>EMAIL_DOMAIN</code> and route that domain's mail to
+                  this Worker.
+                </>
+              )
+            }
+          >
             {inbound.email ? (
+              <CopyButton text={inbound.email} label="Copy email address" />
+            ) : null}
+          </Row>
+          <Row
+            icon={<WebhooksLogoIcon size={14} />}
+            label="Webhook"
+            detail={
               <>
-                <ClipboardText text={inbound.email} />
-                <p className="text-xs text-kumo-subtle">
-                  Forward mail here or point notification emails at it.
-                </p>
+                POST JSON or text. Add <code>?source=github</code> to name the
+                sender.
               </>
-            ) : (
-              <p className="text-xs text-kumo-subtle">
-                Not set up. Set <code>EMAIL_DOMAIN</code> in
-                cloudflare.config.ts and route that domain's mail to this Worker
-                with Email Routing.
-              </p>
-            )}
-          </div>
-          <div className="space-y-1.5">
-            <p className="text-sm text-kumo-default">Webhook</p>
-            {webhookUrl ? <ClipboardText text={webhookUrl} /> : null}
-            <p className="text-xs text-kumo-subtle">
-              POST any JSON or text. Add <code>?source=github</code> to name the
-              sender. Treat the URL like a password.
-            </p>
-            <Button
-              size="sm"
-              variant="secondary"
-              loading={rotating}
+            }
+          >
+            <RowAction
+              label="Make a new URL"
+              disabled={rotating}
               onClick={() => void rotate()}
             >
-              New URL
-            </Button>
-          </div>
-        </div>
+              {rotating ? (
+                <Loader size="sm" />
+              ) : (
+                <ArrowsClockwiseIcon size={16} />
+              )}
+            </RowAction>
+            {webhookUrl ? (
+              <CopyButton text={webhookUrl} label="Copy webhook URL" />
+            ) : null}
+          </Row>
+        </>
       )}
-    </Section>
+    </Group>
   )
 }
 
@@ -619,33 +681,34 @@ function Memory() {
   }
 
   return (
-    <Section
-      title="Memory"
-      hint="What this bot has learned about you and how you want things done. It updates this itself; you can correct it."
-    >
-      {saved === null ? (
-        <Loader size="sm" />
-      ) : (
-        <>
-          <InputArea
-            aria-label="Memory"
-            placeholder="Nothing remembered yet."
-            value={draft}
-            autoResize
-            minRows={4}
-            maxRows={16}
-            onValueChange={setDraft}
-          />
-          <Button
-            disabled={draft === saved}
-            loading={saving}
-            onClick={() => void save()}
-          >
-            Save memory
-          </Button>
-        </>
-      )}
-    </Section>
+    <div className="space-y-2">
+      <Group
+        title="Memory"
+        hint="What it has learned about you and how you like things done. It keeps this up to date itself; you can correct it."
+      >
+        {saved === null ? (
+          <EmptyRow>
+            <Loader size="sm" />
+          </EmptyRow>
+        ) : (
+          <li className="px-4 py-3">
+            <textarea
+              aria-label="Memory"
+              placeholder="Nothing remembered yet."
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              className={`${FIELD} field-sizing-content max-h-96 min-h-24 resize-none leading-6`}
+            />
+          </li>
+        )}
+      </Group>
+      <SaveBar
+        dirty={saved !== null && draft !== saved}
+        saving={saving}
+        onSave={() => void save()}
+        onReset={() => saved !== null && setDraft(saved)}
+      />
+    </div>
   )
 }
 
@@ -667,52 +730,53 @@ function DangerZone() {
   }
 
   return (
-    <Section title="Delete bot">
-      <Dialog.Root open={open} onOpenChange={setOpen}>
-        <Dialog.Trigger
-          render={(props) => (
-            <Button
-              {...props}
-              variant="secondary-destructive"
-              disabled={!hub.live}
-            >
-              Delete {state.name}
-            </Button>
-          )}
-        />
-        <Dialog size="sm" className="space-y-4 p-6">
-          <Dialog.Title className="text-lg font-semibold">
-            Delete {state.name}?
-          </Dialog.Title>
-          <Dialog.Description className="text-sm text-kumo-subtle">
-            Its chat history, memory, routines and every file on its computer
-            are deleted. This can't be undone.
-          </Dialog.Description>
-          <div className="flex justify-end gap-2">
-            <Dialog.Close
-              render={(props) => (
-                <Button {...props} variant="secondary">
-                  Cancel
-                </Button>
-              )}
-            />
-            <Button
-              variant="destructive"
-              loading={deleting}
-              onClick={() => void remove()}
-            >
-              Delete
-            </Button>
-          </div>
-        </Dialog>
-      </Dialog.Root>
-    </Section>
+    <Dialog.Root open={open} onOpenChange={setOpen}>
+      <Dialog.Trigger
+        render={(props) => (
+          <button
+            {...props}
+            type="button"
+            disabled={!hub.live}
+            className="pressable flex h-8 items-center gap-1.5 rounded-full px-3 text-sm text-kumo-subtle outline-none hover:bg-(--fill-hover) hover:text-kumo-danger focus-visible:ring-2 focus-visible:ring-kumo-focus disabled:opacity-50"
+          >
+            <TrashIcon size={16} />
+            Delete {state.name}
+          </button>
+        )}
+      />
+      <Dialog size="sm" className="space-y-4 p-6">
+        <Dialog.Title className="text-lg font-semibold text-balance">
+          Delete {state.name}?
+        </Dialog.Title>
+        <Dialog.Description className="text-sm text-pretty text-kumo-subtle">
+          Its chat history, memory, routines and every file on its computer
+          are deleted. This can't be undone.
+        </Dialog.Description>
+        <div className="flex justify-end gap-2">
+          <Dialog.Close
+            render={(props) => (
+              <Button {...props} variant="secondary" className="rounded-full">
+                Cancel
+              </Button>
+            )}
+          />
+          <Button
+            variant="destructive"
+            className="rounded-full"
+            loading={deleting}
+            onClick={() => void remove()}
+          >
+            Delete
+          </Button>
+        </div>
+      </Dialog>
+    </Dialog.Root>
   )
 }
 
 export function SettingsPanel() {
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div className="min-h-0 flex-1 space-y-8 overflow-y-auto px-4 pt-2 pb-6">
       <Identity />
       <OnItsOwn />
       <OpenItems />

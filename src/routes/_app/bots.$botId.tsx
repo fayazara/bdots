@@ -12,7 +12,7 @@ import { useAgentChat } from "@cloudflare/think/react"
 import { Tooltip } from "@cloudflare/kumo/components/tooltip"
 import {
   GearSixIcon,
-  MonitorIcon,
+  ComputerIcon,
   SidebarSimpleIcon,
 } from "@/components/icons"
 import { BotAvatar } from "@/components/bot-avatar"
@@ -167,7 +167,7 @@ function BotLayout({
               active={computerOpen}
               botId={botId}
             >
-              <MonitorIcon size={20} />
+              <ComputerIcon size={20} />
             </PanelLink>
           </div>
         </header>

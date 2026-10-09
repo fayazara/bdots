@@ -3,7 +3,7 @@ import { Badge } from "@cloudflare/kumo/components/badge"
 import { Button } from "@cloudflare/kumo/components/button"
 import { Dialog } from "@cloudflare/kumo/components/dialog"
 import { Loader } from "@cloudflare/kumo/components/loader"
-import { ArrowClockwiseIcon, MonitorIcon } from "@/components/icons"
+import { ArrowClockwiseIcon, ComputerIcon } from "@/components/icons"
 import type { ToolCall } from "@/lib/message-parts"
 
 export interface LiveTab {
@@ -167,7 +167,7 @@ export function ComputerCard({
                 <Loader />
               ) : (
                 <>
-                  <MonitorIcon size={28} />
+                  <ComputerIcon size={28} />
                   <span>
                     {status === "done"
                       ? "The browser session has closed."

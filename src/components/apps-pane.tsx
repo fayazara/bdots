@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Badge } from "@cloudflare/kumo/components/badge"
 import { Button } from "@cloudflare/kumo/components/button"
-import { ClipboardText } from "@cloudflare/kumo/components/clipboard-text"
-import { Input } from "@cloudflare/kumo/components/input"
 import { Loader } from "@cloudflare/kumo/components/loader"
 import { Select } from "@cloudflare/kumo/components/select"
+import { Tooltip } from "@cloudflare/kumo/components/tooltip"
 import {
   AppWindowIcon,
   ArrowLeftIcon,
   ArrowSquareOutIcon,
+  PlusIcon,
   TrashIcon,
   XIcon,
 } from "@/components/icons"
+import { CopyButton } from "@/components/copy-button"
 import { EmptyState } from "@/components/empty-state"
 import { useBot } from "@/lib/bot-context"
 import type { BotConnection } from "@/lib/bot-context"
@@ -237,6 +237,7 @@ function AppDetail({
             size="sm"
             variant="secondary"
             icon={<ArrowSquareOutIcon />}
+            className="rounded-full"
             onClick={() => window.open(owner.path, "_blank", "noopener")}
           >
             Open
@@ -256,125 +257,160 @@ function AppDetail({
         </div>
       ) : null}
 
-      <div className="space-y-5 p-4">
-        {app.collections.length > 0 ? (
-          <p className="text-xs text-kumo-subtle">
-            Data:{" "}
-            {app.collections.map((c) => `${c.name} (${c.count})`).join(", ")}
-          </p>
-        ) : null}
+      <p className="px-5 pt-2 text-xs text-kumo-subtle tabular-nums">
+        Updated {formatAgo(app.updatedAt)}
+        {app.collections.map((c) => ` · ${c.count} ${c.name}`).join("")}
+      </p>
 
-        {owner ? (
-          <div className="space-y-1.5">
-            <p className="text-sm text-kumo-default">Your link</p>
-            <ClipboardText text={absolute(owner.path)} />
-            <p className="text-xs text-kumo-subtle">
-              Anyone with a link can open the app, no login needed. Treat links
-              like passwords.
-            </p>
-          </div>
-        ) : null}
-
-        <div className="space-y-2">
-          <p className="text-sm text-kumo-default">Shared with</p>
-          {shared.length === 0 ? (
-            <p className="text-xs text-kumo-subtle">Nobody yet.</p>
-          ) : (
-            <ul className="space-y-3">
-              {shared.map((link) => (
-                <li key={link.token} className="space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate text-sm text-kumo-default">
-                      {link.label}
-                    </span>
-                    <Badge
-                      variant={link.mode === "edit" ? "primary" : "secondary"}
-                    >
-                      {MODE_LABELS[link.mode]}
-                    </Badge>
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      shape="square"
-                      icon={<XIcon />}
-                      aria-label={`Revoke ${link.label}'s link`}
-                      onClick={() => void revoke(link.token)}
-                    />
-                  </div>
-                  <ClipboardText text={absolute(link.path)} />
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="flex items-end gap-2 pt-1">
-            <Input
-              label="New link for"
-              size="sm"
-              placeholder="e.g. Sarah"
-              value={label}
-              maxLength={40}
-              onChange={(e) => setLabel(e.target.value)}
-              className="min-w-0 flex-1"
+      <div className="space-y-2 px-4 pt-6 pb-4">
+        <h4 className="px-1.5 text-sm font-medium text-kumo-default">
+          People with access
+        </h4>
+        <ul className="overflow-hidden rounded-2xl bg-kumo-base outline outline-1 -outline-offset-1 outline-black/[0.06]">
+          {owner ? (
+            <PersonRow name="You" detail="Owner" path={owner.path} />
+          ) : null}
+          {shared.map((link) => (
+            <PersonRow
+              key={link.token}
+              name={link.label}
+              detail={MODE_LABELS[link.mode]}
+              path={link.path}
+              onRevoke={() => void revoke(link.token)}
             />
-            <Select
-              aria-label="Access"
-              size="sm"
-              className="w-28 shrink-0"
-              value={mode}
-              items={MODE_LABELS}
-              onValueChange={(value) =>
-                value && setMode(value as AppLink["mode"])
-              }
-            />
-            <Button
-              size="sm"
-              loading={creating}
-              disabled={!label.trim()}
-              onClick={() => void share()}
+          ))}
+          <li className="border-t border-kumo-line first:border-t-0">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (label.trim()) void share()
+              }}
+              className="flex min-h-14 items-center gap-2 py-3 pr-3 pl-4"
             >
-              Share
-            </Button>
-          </div>
-          <p className="text-xs text-kumo-subtle">
-            When someone edits through their link, the bot sees it under that
-            name and can react.
-          </p>
-        </div>
-
-        <div className="pt-2">
-          {confirmDelete ? (
-            <div className="flex items-center gap-2">
-              <span className="flex-1 text-sm text-kumo-default">
-                Delete the app, its data and all links?
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-(--fill-hover) text-kumo-subtle">
+                <PlusIcon size={14} />
               </span>
-              <Button
+              <input
+                value={label}
+                maxLength={40}
+                onChange={(e) => setLabel(e.target.value)}
+                placeholder="Add a person"
+                aria-label="Name of the person to share with"
+                className="h-8 min-w-0 flex-1 bg-transparent text-sm text-kumo-default outline-none placeholder:text-kumo-placeholder"
+              />
+              <Select
+                aria-label="Access"
                 size="sm"
-                variant="ghost"
-                onClick={() => setConfirmDelete(false)}
-              >
-                Cancel
-              </Button>
+                className="w-28 shrink-0"
+                value={mode}
+                items={MODE_LABELS}
+                onValueChange={(value) =>
+                  value && setMode(value as AppLink["mode"])
+                }
+              />
               <Button
+                type="submit"
                 size="sm"
-                variant="destructive"
-                loading={deleting}
-                onClick={() => void remove()}
+                variant="primary"
+                className="btn-ink rounded-full"
+                loading={creating}
+                disabled={!label.trim()}
               >
-                Delete
+                Share
               </Button>
-            </div>
-          ) : (
+            </form>
+          </li>
+        </ul>
+        <p className="px-1.5 text-xs text-pretty text-kumo-subtle">
+          Anyone with a link can open the app without signing in, so share it
+          like a password. Edits reach the bot under that person's name.
+        </p>
+      </div>
+
+      <div className="mt-auto flex items-center gap-2 px-4 pt-2 pb-4">
+        {confirmDelete ? (
+          <>
+            <span className="flex-1 px-1 text-sm text-kumo-default">
+              Delete the app, its data and all links?
+            </span>
             <Button
               size="sm"
               variant="ghost"
-              icon={<TrashIcon />}
-              onClick={() => setConfirmDelete(true)}
+              className="rounded-full"
+              onClick={() => setConfirmDelete(false)}
             >
-              Delete app
+              Cancel
             </Button>
-          )}
-        </div>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="rounded-full"
+              loading={deleting}
+              onClick={() => void remove()}
+            >
+              Delete
+            </Button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(true)}
+            className="pressable flex h-8 items-center gap-1.5 rounded-full px-3 text-sm text-kumo-subtle outline-none hover:bg-(--fill-hover) hover:text-kumo-danger focus-visible:ring-2 focus-visible:ring-kumo-focus"
+          >
+            <TrashIcon size={16} />
+            Delete app
+          </button>
+        )}
       </div>
     </div>
+  )
+}
+
+/** One person who can open the app: who, what they can do, copy their link. */
+function PersonRow({
+  name,
+  detail,
+  path,
+  onRevoke,
+}: {
+  name: string
+  detail: string
+  path: string
+  onRevoke?: () => void
+}) {
+  return (
+    <li className="flex min-h-14 items-center gap-3 border-t border-kumo-line py-3 pr-3 pl-4 first:border-t-0">
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-(--fill-active) text-xs font-medium text-kumo-default">
+        {name.charAt(0).toUpperCase()}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm text-kumo-default">{name}</span>
+        <span className="mt-0.5 block max-w-[75%] text-xs text-pretty text-kumo-subtle">
+          {detail}
+        </span>
+      </span>
+      <CopyButton
+        text={absolute(path)}
+        label={`Copy ${name === "You" ? "your" : `${name}'s`} link`}
+      />
+      {onRevoke ? (
+        <Tooltip
+          content="Remove access"
+          render={
+            <button
+              type="button"
+              aria-label={`Remove ${name}'s access`}
+              onClick={onRevoke}
+              className="icon-btn size-8! hover:text-kumo-danger!"
+            >
+              <XIcon size={16} />
+            </button>
+          }
+        />
+      ) : (
+        // Keeps every row's copy button in the same column.
+        <span aria-hidden className="size-8 shrink-0" />
+      )}
+    </li>
   )
 }
