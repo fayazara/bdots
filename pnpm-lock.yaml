@@ -71,9 +71,6 @@ importers:
       ai:
         specifier: ^7.0.123
         version: 7.0.123(zod@4.6.5)
-      bot-avatars:
-        specifier: ^0.1.2
-        version: 0.1.2(react@19.3.0)
       drizzle-orm:
         specifier: ^0.45.3
         version: 0.45.3(sql.js@1.14.2)
@@ -95,6 +92,9 @@ importers:
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
+      robot-heads:
+        specifier: ^0.2.0
+        version: 0.2.0(react@19.3.0)
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
@@ -2857,11 +2857,6 @@ packages:
     resolution: {integrity: sha512-2cGmJupaNgg+QUwVLAucDuWuoMZ6EX9iHDRswZ5lsNYEmwPaRknMPCLZz07yTzVq/83p4o/wzbDZbBrTvGGTIw==}
     engines: {node: '>=18'}
 
-  bot-avatars@0.1.2:
-    resolution: {integrity: sha512-XwOf7UF1TI3rPKWQ2G7Y68yRHE0EsIqmENdbxfxwZObs1nPh5ZEFzHyUVBuopU6awUSuQA/mozjPc+68lWyg/Q==}
-    peerDependencies:
-      react: '>=18.0.0'
-
   brace-expansion@5.0.12:
     resolution: {integrity: sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ==}
     engines: {node: 20 || >=22}
@@ -4642,6 +4637,11 @@ packages:
 
   rettime@0.10.1:
     resolution: {integrity: sha512-uyDrIlUEH37cinabq0AX4QbgV4HbFZ/gqoiunWQ1UqBtRvTTytwhNYjE++pO/MjPTZL5KQCf2bEoJ/BJNVQ5Kw==}
+
+  robot-heads@0.2.0:
+    resolution: {integrity: sha512-Pn+Fl/X2uqlixaJF6X7gT0V8Y6VINJQMxNWLdcg6eCkFGAV5Un/3JkVWnucc8qf4xtU80XCuiOgO09T+VG1T1g==}
+    peerDependencies:
+      react: '>=18.0.0'
 
   rolldown@1.2.11:
     resolution: {integrity: sha512-qpSwIyz0jHQq5qXBTNxFmE6664rJ7O+4TvPFOiOaBSrz8IOHc1koKKSqTM2H6u1UG1+TveuC6vaDHKXFOvb1Kw==}
@@ -7769,10 +7769,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  bot-avatars@0.1.2(react@19.3.0):
-    dependencies:
-      react: 19.3.0
-
   brace-expansion@5.0.12:
     dependencies:
       balanced-match: 4.0.4
@@ -9744,6 +9740,10 @@ snapshots:
 
   rettime@0.10.1:
     optional: true
+
+  robot-heads@0.2.0(react@19.3.0):
+    dependencies:
+      react: 19.3.0
 
   rolldown@1.2.11:
     dependencies:

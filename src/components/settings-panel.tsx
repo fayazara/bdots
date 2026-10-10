@@ -6,6 +6,7 @@ import { Loader } from "@cloudflare/kumo/components/loader"
 import { Select } from "@cloudflare/kumo/components/select"
 import { Switch } from "@cloudflare/kumo/components/switch"
 import { CopyButton } from "@/components/copy-button"
+import { RoutineCard } from "@/components/routine-card"
 import {
   EmptyRow,
   FIELD,
@@ -19,7 +20,6 @@ import {
   ArrowsClockwiseIcon,
   BookOpenTextIcon,
   CaretRightIcon,
-  ClockIcon,
   EnvelopeSimpleIcon,
   EyeIcon,
   PlugsConnectedIcon,
@@ -423,31 +423,13 @@ function Routines() {
         <EmptyRow>No routines yet</EmptyRow>
       ) : (
         state.routines.map((routine) => (
-          <Row
+          <RoutineCard
             key={routine.id}
-            icon={<ClockIcon size={14} />}
-            label={routine.name}
-            detail={
-              <span className="line-clamp-2">
-                <span className="tabular-nums">
-                  {routine.kind === "cron"
-                    ? routine.when
-                    : new Date(routine.when).toLocaleString()}
-                </span>
-                {" · "}
-                {routine.prompt}
-              </span>
+            routine={routine}
+            onDelete={
+              agent ? () => void agent.stub.deleteRoutine(routine.id) : undefined
             }
-          >
-            <RowAction
-              label={`Delete routine ${routine.name}`}
-              disabled={!agent}
-              danger
-              onClick={() => void agent?.stub.deleteRoutine(routine.id)}
-            >
-              <TrashIcon size={16} />
-            </RowAction>
-          </Row>
+          />
         ))
       )}
     </Group>

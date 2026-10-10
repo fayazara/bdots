@@ -22,8 +22,24 @@ export type Block =
   | { kind: "computer"; key: string; calls: ToolCall[] }
   | { kind: "steps"; key: string; calls: ToolCall[] }
   | { kind: "approval"; key: string; call: ToolCall }
+  | { kind: "capture"; key: string; call: ToolCall; capture: Capture }
+
+/** A screenshot or PDF a tool saved to the bot's files. */
+export interface Capture {
+  path: string
+  mediaType: string
+}
 
 const COMPUTER_TOOLS = new Set(["browser_execute", "request_handoff"])
+const CAPTURE_TOOLS = new Set(["browser_screenshot", "browser_pdf"])
+
+function captureOf(call: ToolCall): Capture | null {
+  const out = call.output as { saved?: unknown; mediaType?: unknown } | null
+  if (typeof out?.saved !== "string" || typeof out.mediaType !== "string") {
+    return null
+  }
+  return { path: out.saved, mediaType: out.mediaType }
+}
 
 type Part = UIMessage["parts"][number]
 
@@ -122,6 +138,14 @@ export function toBlocks(message: UIMessage): Block[] {
     // Bookkeeping the user does not need to see.
     if (call.name === "mark_reported" || call.name === "was_reported") return
 
+    if (CAPTURE_TOOLS.has(call.name) && call.state === "done") {
+      const capture = captureOf(call)
+      if (capture) {
+        blocks.push({ kind: "capture", key, call, capture })
+        return
+      }
+    }
+
     const last = blocks.at(-1)
     if (COMPUTER_TOOLS.has(call.name)) {
       if (last?.kind === "computer") last.calls.push(call)
@@ -202,11 +226,19 @@ export function describeCall(call: ToolCall): string {
     case "browser_links":
       return `Listed links on ${str("url")}`
     case "browser_scrape":
-      return `Scraped ${str("url")}`
+      return `Scraped ${str("url") || "a page"}`
+    case "browser_screenshot":
+      return `Took a screenshot of ${str("url") || "a page"}`
+    case "browser_pdf":
+      return `Saved ${str("url") || "a page"} as PDF`
+    case "browser_crawl":
+      return `Started crawling ${str("url")}`
     case "message_bot":
       return `Messaged ${str("to")}`
     case "schedule_routine":
       return `Scheduled "${str("name")}"`
+    case "update_routine":
+      return "Updated a routine"
     case "list_routines":
       return "Checked routines"
     case "cancel_routine":

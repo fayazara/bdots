@@ -116,7 +116,7 @@ function BotRow({ bot, active }: { bot: BotSummary; active: boolean }) {
       }`}
     >
       <span className="relative">
-        <BotAvatar avatar={bot.avatar} status={bot.status} size={40} />
+        <BotAvatar avatar={bot.avatar} status={bot.status} size={48} />
         {bot.unread && !active ? (
           <span
             className="unread-dot absolute -top-0.5 -right-0.5 size-3 rounded-full bg-kumo-danger ring-2 ring-kumo-canvas"
@@ -223,10 +223,10 @@ export function Sidebar() {
         ) : null}
       </nav>
 
-      {/* Shares the composer's centre line; the avatar sits in a 40px slot so
+      {/* Shares the composer's centre line; the avatar sits in a 48px slot so
           it centres under the bot avatars above. */}
       <div className="flex h-(--footer-h) shrink-0 items-center gap-3 pr-(--inset) pl-5">
-        <span className="flex w-10 shrink-0 justify-center">
+        <span className="flex w-12 shrink-0 justify-center">
           {hub.viewer.avatarUrl ? (
             <img
               src={hub.viewer.avatarUrl}

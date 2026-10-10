@@ -12,6 +12,8 @@ import {
   WarningIcon,
 } from "@/components/icons"
 import { AppsPane } from "@/components/apps-pane"
+import { useFileData } from "@/components/capture-card"
+import type { ReadFileData } from "@/components/capture-card"
 import { LiveViewFrame, useLiveView } from "@/components/computer-card"
 import { CodeBlock, languageForPath } from "@/components/code-block"
 import { EmptyState } from "@/components/empty-state"
@@ -257,6 +259,42 @@ const TREE_STYLE = {
 
 const WORKSPACE_ROOT = "/workspace"
 
+const BINARY_PREVIEW = /\.(png|jpe?g|gif|webp|pdf)$/i
+
+/** An image or PDF from the bot's files. */
+function BinaryPreview({
+  path,
+  readFile,
+}: {
+  path: string
+  readFile: ReadFileData
+}) {
+  const { url, error } = useFileData(readFile, path)
+  if (error) {
+    return (
+      <p role="alert" className="p-4 text-sm text-kumo-danger">
+        {error}
+      </p>
+    )
+  }
+  if (!url) {
+    return (
+      <div className="flex justify-center py-10">
+        <Loader size="sm" />
+      </div>
+    )
+  }
+  return path.toLowerCase().endsWith(".pdf") ? (
+    <iframe
+      src={url}
+      title={path}
+      className="h-full min-h-[480px] w-full border-0"
+    />
+  ) : (
+    <img src={url} alt={path} className="block max-w-full p-4" />
+  )
+}
+
 function FilesPane({ agent }: { agent: BotConnection }) {
   const [loaded, setLoaded] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
@@ -265,12 +303,17 @@ function FilesPane({ agent }: { agent: BotConnection }) {
     truncated: boolean
   } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const readFile = useCallback<ReadFileData>(
+    (path) => agent.stub.readFileData(path),
+    [agent]
+  )
 
   const select = useCallback(
     async (path: string) => {
       setSelected(path)
       setPreview(null)
       setError(null)
+      if (BINARY_PREVIEW.test(path)) return
       try {
         setPreview(await agent.stub.readFileText(`${WORKSPACE_ROOT}/${path}`))
       } catch (err) {
@@ -343,6 +386,16 @@ function FilesPane({ agent }: { agent: BotConnection }) {
           <p role="alert" className="p-4 text-sm text-kumo-danger">
             {error}
           </p>
+        ) : BINARY_PREVIEW.test(selected) ? (
+          <>
+            <p className="sticky top-0 flex h-10 items-center border-b border-kumo-line bg-kumo-base px-4 text-xs text-kumo-subtle">
+              {WORKSPACE_ROOT}/{selected}
+            </p>
+            <BinaryPreview
+              path={`${WORKSPACE_ROOT}/${selected}`}
+              readFile={readFile}
+            />
+          </>
         ) : preview === null ? (
           <div className="flex justify-center py-10">
             <Loader size="sm" />

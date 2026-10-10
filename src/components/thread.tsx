@@ -10,11 +10,13 @@ import {
   CaretRightIcon,
   CheckIcon,
   ClockIcon,
+  CrawlIcon,
   EnvelopeSimpleIcon,
   WarningIcon,
   WebhooksLogoIcon,
 } from "@/components/icons"
 import { BotAvatar } from "@/components/bot-avatar"
+import { CaptureCard } from "@/components/capture-card"
 import { CodeBlock } from "@/components/code-block"
 import { ComputerCard } from "@/components/computer-card"
 import {
@@ -28,6 +30,7 @@ import {
 } from "@/lib/message-parts"
 import { NO_UPDATE } from "@/lib/types"
 import type { UIMessage } from "ai"
+import type { ReadFileData } from "@/components/capture-card"
 import type { GetLiveView } from "@/components/computer-card"
 import type { Block, ToolCall } from "@/lib/message-parts"
 import type { BotState } from "@/lib/types"
@@ -44,6 +47,8 @@ interface ThreadProps {
   /** A turn is in flight (submitted or streaming). */
   busy: boolean
   getLiveView?: GetLiveView
+  /** Loads screenshots and PDFs the bot saved. Absent before hydration. */
+  readFile?: ReadFileData
   onApproval?: OnApproval
 }
 
@@ -204,11 +209,13 @@ function AssistantMessage({
   blocks,
   latestComputerKey,
   getLiveView,
+  readFile,
   onApproval,
 }: {
   blocks: Block[]
   latestComputerKey: string | undefined
   getLiveView?: GetLiveView
+  readFile?: ReadFileData
   onApproval?: OnApproval
 }) {
   return (
@@ -238,6 +245,14 @@ function AssistantMessage({
             )
           case "steps":
             return <Steps key={block.key} calls={block.calls} />
+          case "capture":
+            return (
+              <CaptureCard
+                key={block.key}
+                capture={block.capture}
+                readFile={readFile}
+              />
+            )
           case "approval":
             return (
               <ApprovalCard
@@ -262,7 +277,7 @@ function UserMessage({ message }: { message: UIMessage }) {
         <SystemEvent>
           Message from{" "}
           <span className="inline-flex items-center gap-1.5 align-middle font-medium text-kumo-default">
-            <BotAvatar avatar={origin.avatar ?? "circle"} size={16} />
+            <BotAvatar avatar={origin.avatar ?? "blue-rectangle"} size={16} />
             {origin.name}
           </span>
         </SystemEvent>
@@ -276,7 +291,8 @@ function UserMessage({ message }: { message: UIMessage }) {
     origin?.kind === "routine" ||
     origin?.kind === "email" ||
     origin?.kind === "webhook" ||
-    origin?.kind === "app"
+    origin?.kind === "app" ||
+    origin?.kind === "crawl"
   ) {
     const [Icon, label] =
       origin.kind === "routine"
@@ -285,7 +301,9 @@ function UserMessage({ message }: { message: UIMessage }) {
           ? [EnvelopeSimpleIcon, `Email from ${origin.name}`]
           : origin.kind === "app"
             ? [AppWindowIcon, `Changes in ${origin.name}`]
-            : [WebhooksLogoIcon, `Webhook · ${origin.name}`]
+            : origin.kind === "crawl"
+              ? [CrawlIcon, `Crawl finished · ${origin.name}`]
+              : [WebhooksLogoIcon, `Webhook · ${origin.name}`]
     return (
       <SystemEvent>
         <span className="inline-flex max-w-full items-center gap-1.5 align-middle">
@@ -349,6 +367,7 @@ export function Thread({
   messages,
   busy,
   getLiveView,
+  readFile,
   onApproval,
 }: ThreadProps) {
   const scroller = useRef<HTMLDivElement>(null)
@@ -436,6 +455,7 @@ export function Thread({
                 blocks={blocks}
                 latestComputerKey={latestComputerKey}
                 getLiveView={getLiveView}
+                readFile={readFile}
                 onApproval={onApproval}
               />
             )}

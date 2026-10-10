@@ -147,7 +147,7 @@ function BotLayout({
           />
           {/* The bot's name floats in the middle, like a window title. */}
           <div className="absolute left-1/2 flex h-9 max-w-[50%] -translate-x-1/2 items-center gap-2 rounded-full bg-kumo-base pr-4 pl-1.5 shadow-[0_0_0_1px_var(--color-kumo-line),0_1px_2px_oklch(0_0_0/0.04),0_2px_8px_oklch(0_0_0/0.04)]">
-            <BotAvatar avatar={state.avatar} status={state.status} size={24} />
+            <BotAvatar avatar={state.avatar} status={state.status} size={30} />
             <h1 className="truncate text-[15px] font-medium text-kumo-default">
               {state.name}
             </h1>
@@ -222,6 +222,10 @@ function LiveBot({
   }, [agent, connected, timezone])
 
   const getLiveView = useCallback(() => agent.stub.getLiveView(), [agent])
+  const readFile = useCallback(
+    (path: string) => agent.stub.readFileData(path),
+    [agent]
+  )
 
   const onApproval = useCallback<OnApproval>(
     (id, approved, reason) => {
@@ -248,6 +252,7 @@ function LiveBot({
         messages={chat.messages}
         busy={busy}
         getLiveView={getLiveView}
+        readFile={readFile}
         onApproval={onApproval}
       />
       {chat.error ? (

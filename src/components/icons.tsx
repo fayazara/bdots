@@ -14,7 +14,10 @@ import {
   Copy01Icon as Copy,
   AiBrowserIcon as AiBrowser,
   Delete02Icon as Delete,
+  Download04Icon as Download,
   Globe02Icon as Globe,
+  Pdf01Icon as Pdf,
+  WebDesign01Icon as WebDesign,
   LeftToRightListBulletIcon as ListBullet,
   LinkSquare02Icon as LinkSquare,
   Mail01Icon as Mail,
@@ -78,6 +81,9 @@ export const ChalkboardTeacherIcon = icon(Teaching, "ChalkboardTeacherIcon")
 export const CheckIcon = icon(Tick, "CheckIcon")
 export const ClockIcon = icon(Clock, "ClockIcon")
 export const CopyIcon = icon(Copy, "CopyIcon")
+export const DownloadIcon = icon(Download, "DownloadIcon")
+export const FilePdfIcon = icon(Pdf, "FilePdfIcon")
+export const CrawlIcon = icon(WebDesign, "CrawlIcon")
 export const EnvelopeSimpleIcon = icon(Mail, "EnvelopeSimpleIcon")
 export const EyeIcon = icon(View, "EyeIcon")
 export const GearSixIcon = icon(Settings, "GearSixIcon")

@@ -36,6 +36,15 @@ export default defineConfig({
       AI: bindings.ai({ dev: { remote: true } }),
       // Browser Run: Quick Actions, Chromium sessions, Live View.
       BROWSER: bindings.browser({ dev: { remote: true } }),
+      // Engine Quick Actions try first for page reads and extraction:
+      // "kitesurf" (cheaper, falls back to Chromium when a page does not
+      // render) or "chromium". Screenshots and PDFs always use Chromium.
+      QUICK_ACTION_ENGINE: bindings.text("kitesurf"),
+      // Optional: turns on the browser_crawl tool. /crawl is REST-only, so
+      // it needs the account id here and an API token with "Browser
+      // Rendering - Edit" in .dev.vars / the deploy secrets file.
+      BROWSER_RUN_ACCOUNT_ID: bindings.text(""),
+      BROWSER_RUN_API_TOKEN: bindings.secret(),
       // Dynamic Workers: the bot's shell and sandboxed browser code.
       LOADER: bindings.workerLoader(),
       UserHub: bindings.durableObject({

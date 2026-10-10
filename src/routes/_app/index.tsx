@@ -39,9 +39,9 @@ function Onboarding() {
         className="flex items-end gap-2"
         style={{ "--i": 0 } as React.CSSProperties}
       >
-        <BotAvatar avatar="clover" size={56} interactive />
-        <BotAvatar avatar="blob" size={80} interactive />
-        <BotAvatar avatar="star" size={56} interactive />
+        <BotAvatar avatar="coral-circle" size={56} interactive />
+        <BotAvatar avatar="blue-rectangle" size={80} interactive />
+        <BotAvatar avatar="green-hexagon" size={56} interactive />
       </div>
       <div
         className="max-w-md space-y-2"

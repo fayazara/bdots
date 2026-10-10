@@ -76,6 +76,7 @@ import {
   SOUL,
   appEventPrompt,
   checkInPrompt,
+  crawlPrompt,
   emailPrompt,
   routinePrompt,
   turnContext,
@@ -85,6 +86,8 @@ import type { ReportedEntry } from "./prompt"
 import { finishTeachingCode, startTeachingCode } from "./teach"
 import type { TeachRecording, TeachSession } from "./teach"
 import type { UserHub } from "./user-hub"
+import { createWebTools } from "./web-tools"
+import type { CrawlInput, QuickEngine } from "./web-tools"
 
 // The worker-shell backend hands this class to its Dynamic Worker as a
 // loopback binding (via `ctx.exports`), so it must be exported by the Worker
@@ -111,9 +114,13 @@ const TOOL_CLASS: Record<string, ActionClass> = {
   browser_extract: "browse",
   browser_links: "browse",
   browser_scrape: "browse",
+  browser_screenshot: "browse",
+  browser_pdf: "browse",
+  browser_crawl: "browse",
   browser_execute: "browser",
   message_bot: "bots",
   schedule_routine: "routines",
+  update_routine: "routines",
   start_teaching: "browser",
   finish_teaching: "browser",
   save_skill: "files",
@@ -177,7 +184,34 @@ interface RoutinePayload {
   name: string
   prompt: string
   kind: Routine["kind"]
+  onlyNew?: boolean
 }
+
+/** A Browser Run crawl the bot started, polled until it finishes. */
+interface CrawlJob {
+  id: string
+  url: string
+  purpose: string
+  startedAt: number
+  polls: number
+}
+
+interface CrawlRecord {
+  url: string
+  status: string
+  markdown?: string
+  metadata?: { title?: string; status?: number }
+}
+
+const CRAWL_FIRST_POLL_S = 20
+const CRAWL_MAX_POLL_S = 300
+/** Give up on a crawl that has not finished after this long. */
+const CRAWL_MAX_WAIT_MS = 6 * 60 * 60 * 1000
+const CRAWL_PAGE_SIZE = 50
+const MAX_CRAWL_PAGES = 500
+/** Images and PDFs the Files pane and thread can preview. */
+const MAX_FILE_DATA_BYTES = 10 * 1024 * 1024
+const ROUTINE_REPORTED_IN_PROMPT = 60
 
 function textOf(message: UIMessage | undefined) {
   if (!message) return ""
@@ -333,7 +367,7 @@ function unwrapToolResult(result: unknown) {
 export class BotAgent extends Think<Env, BotState> {
   initialState: BotState = {
     name: NEW_BOT_NAME,
-    avatar: "circle",
+    avatar: "blue-rectangle",
     role: "",
     status: "idle",
     rules: DEFAULT_RULES,
@@ -680,9 +714,36 @@ export class BotAgent extends Think<Env, BotState> {
       browser: this.env.BROWSER,
       loader: this.env.LOADER,
       session: { mode: "reuse", key: "main" },
-      quickActions: { maxChars: 30_000 },
+      // Quick Actions come from ./web-tools instead.
+      quickActions: false,
     })
     return this.#browser
+  }
+
+  /** Quick Actions (and crawl, when configured) on Browser Run. */
+  private webTools(): ToolSet {
+    // Typed as the literal default; deploys may set it to "chromium".
+    const configured: string = this.env.QUICK_ACTION_ENGINE
+    const engine: QuickEngine =
+      configured === "chromium" ? "chromium" : "kitesurf"
+    return createWebTools({
+      browser: this.env.BROWSER,
+      engine,
+      save: (path, content) => this.saveFile(path, content),
+      startCrawl: this.crawlConfigured()
+        ? (input) => this.startCrawl(input)
+        : undefined,
+    })
+  }
+
+  /** Write a file under /workspace, creating its folder. */
+  private async saveFile(relative: string, content: string | Uint8Array) {
+    const path = `${WORKSPACE_ROOT}/${relative.replace(/^\/+/, "")}`
+    await this.workspace.fs.mkdir(path.slice(0, path.lastIndexOf("/")), {
+      recursive: true,
+    })
+    await this.workspace.fs.writeFile(path, content)
+    return path
   }
 
   private policyFor(toolName: string): RulePolicy {
@@ -748,6 +809,7 @@ export class BotAgent extends Think<Env, BotState> {
         },
       }),
       ...this.browser.tools,
+      ...this.webTools(),
       // Last turn's catalog; beforeTurn swaps in a fresh one.
       ...this.#appTools,
       ...this.botTools(),
@@ -811,16 +873,24 @@ export class BotAgent extends Think<Env, BotState> {
 
       schedule_routine: tool({
         description:
-          "Schedule work for later. Use `cron` (5-field, UTC) for something recurring, or `at` (ISO 8601 date-time) for a one-off. When it fires you receive `prompt` as a new task.",
+          "Schedule work for later. Use `cron` (5-field, UTC) for something recurring, or `at` (ISO 8601 date-time) for a one-off. When it fires you receive `prompt` as a new task, with no memory of this conversation. If you just did the task, write down the method that worked so the routine does not have to rediscover it.",
         inputSchema: z.object({
           name: z.string().describe("Short label, e.g. 'Morning inbox digest'"),
           prompt: z
             .string()
-            .describe("Self-contained instructions for your future self"),
+            .describe(
+              "Self-contained instructions for your future self: the goal, the exact method that worked (tool, URL, CSS selectors or schema, skill file), and how to format the report"
+            ),
           cron: z.string().optional(),
           at: z.string().optional(),
+          onlyNew: z
+            .boolean()
+            .optional()
+            .describe(
+              "Only message the user about things not reported on an earlier run, and stay quiet otherwise. Use it for routines that run more than daily, or when the user wants changes only. Each run is told how to track what it reported, so the prompt does not need to explain it."
+            ),
         }),
-        execute: async ({ name, prompt, cron, at }) => {
+        execute: async ({ name, prompt, cron, at, onlyNew }) => {
           if (!cron === !at) {
             return { error: "Provide exactly one of `cron` or `at`." }
           }
@@ -829,8 +899,33 @@ export class BotAgent extends Think<Env, BotState> {
             prompt,
             when: (cron ?? at)!,
             kind: cron ? "cron" : "once",
+            ...(onlyNew ? { onlyNew: true } : {}),
           })
           return { scheduled: routine }
+        },
+      }),
+
+      update_routine: tool({
+        description:
+          "Change a routine: fix its instructions when the method in them stopped working, or change its name, schedule or onlyNew. Only the fields you pass change.",
+        inputSchema: z.object({
+          id: z.string(),
+          name: z.string().optional(),
+          prompt: z.string().optional(),
+          cron: z.string().optional(),
+          at: z.string().optional(),
+          onlyNew: z.boolean().optional(),
+        }),
+        execute: async ({ id, cron, at, ...patch }) => {
+          if (cron && at) {
+            return { error: "Provide at most one of `cron` or `at`." }
+          }
+          const routine = await this.updateRoutine(id, {
+            ...patch,
+            ...(cron ? { when: cron, kind: "cron" as const } : {}),
+            ...(at ? { when: at, kind: "once" as const } : {}),
+          })
+          return routine ? { updated: routine } : { error: `No routine ${id}` }
         },
       }),
 
@@ -1866,9 +1961,206 @@ export class BotAgent extends Think<Env, BotState> {
     }
     await this.submitAs(
       { kind: "routine", name: payload.name },
-      routinePrompt(payload.name, payload.prompt),
+      routinePrompt({
+        id: payload.id,
+        name: payload.name,
+        prompt: payload.prompt,
+        onlyNew: payload.onlyNew === true,
+        reported: payload.onlyNew ? this.reportedFor(payload.id) : [],
+        timeZone: this.state.proactive.timezone,
+      }),
       { background: true }
     )
+  }
+
+  /** What earlier runs of this routine told the user (see routinePrompt). */
+  private reportedFor(routineId: string): ReportedEntry[] {
+    return this.sql<ReportedEntry>`SELECT key, note, at FROM reported
+      WHERE key LIKE ${`routine:${routineId}:%`}
+      ORDER BY at DESC LIMIT ${ROUTINE_REPORTED_IN_PROMPT}`
+  }
+
+  // ── Crawls ──────────────────────────────────────────────────────────
+
+  private crawlConfigured() {
+    return Boolean(
+      this.env.BROWSER_RUN_ACCOUNT_ID?.trim() &&
+      this.env.BROWSER_RUN_API_TOKEN?.trim()
+    )
+  }
+
+  /** `/crawl` is REST-only, so it needs an account id and API token. */
+  private crawlRequest(path: string, init: RequestInit = {}) {
+    const account = this.env.BROWSER_RUN_ACCOUNT_ID.trim()
+    return fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${account}/browser-run/crawl${path}`,
+      {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${this.env.BROWSER_RUN_API_TOKEN.trim()}`,
+          "Content-Type": "application/json",
+        },
+      }
+    )
+  }
+
+  private async startCrawl(input: CrawlInput) {
+    const patterns = {
+      ...(input.includePatterns?.length
+        ? { includePatterns: input.includePatterns }
+        : {}),
+      ...(input.excludePatterns?.length
+        ? { excludePatterns: input.excludePatterns }
+        : {}),
+    }
+    const res = await this.crawlRequest("", {
+      method: "POST",
+      body: JSON.stringify({
+        url: input.url,
+        limit: input.limit ?? 25,
+        ...(input.depth ? { depth: input.depth } : {}),
+        formats: ["markdown"],
+        render: input.render ?? false,
+        // The bot reads and keeps what it crawls for the user. Declaring
+        // that honestly lets sites that only refuse AI training through.
+        crawlPurposes: ["ai-input"],
+        contentUse: "reference",
+        ...(Object.keys(patterns).length ? { options: patterns } : {}),
+      }),
+    })
+    const body = (await res.json().catch(() => ({}))) as {
+      success?: boolean
+      result?: string
+      errors?: { message: string }[]
+    }
+    if (!res.ok || !body.success || !body.result) {
+      throw new Error(
+        body.errors?.[0]?.message ??
+          `The crawl did not start (HTTP ${res.status})`
+      )
+    }
+    const job: CrawlJob = {
+      id: body.result,
+      url: input.url,
+      purpose: input.purpose,
+      startedAt: Date.now(),
+      polls: 0,
+    }
+    this.ctx.storage.kv.put(`crawl:${job.id}`, job)
+    await this.schedule(CRAWL_FIRST_POLL_S, "pollCrawl", { id: job.id })
+    return { jobId: job.id }
+  }
+
+  /** Schedule callback: check a crawl, and hand the result over when done. */
+  async pollCrawl(payload: { id: string }) {
+    const key = `crawl:${payload.id}`
+    const job = this.ctx.storage.kv.get<CrawlJob>(key)
+    if (!job) return
+    let status = "running"
+    try {
+      const res = await this.crawlRequest(`/${job.id}?limit=1`)
+      const body = (await res.json()) as { result?: { status?: string } }
+      if (res.ok && body.result?.status) status = body.result.status
+    } catch (err) {
+      // A failed poll is retried on the next one.
+      console.error("Crawl poll failed", err)
+    }
+    if (status === "running") {
+      if (Date.now() - job.startedAt < CRAWL_MAX_WAIT_MS) {
+        job.polls += 1
+        this.ctx.storage.kv.put(key, job)
+        const delay = Math.min(
+          CRAWL_MAX_POLL_S,
+          CRAWL_FIRST_POLL_S * 2 ** Math.min(job.polls, 4)
+        )
+        await this.schedule(delay, "pollCrawl", payload)
+        return
+      }
+      status = "still running after 6 hours, so I stopped waiting"
+    }
+    this.ctx.storage.kv.delete(key)
+    const saved = status === "completed" ? await this.saveCrawl(job) : undefined
+    let host = job.url
+    try {
+      host = new URL(job.url).hostname
+    } catch {
+      // Keep the raw URL.
+    }
+    await this.submitAs(
+      { kind: "crawl", name: host },
+      crawlPrompt({ url: job.url, purpose: job.purpose, status, saved }),
+      { background: true, key: `crawl:${job.id}` }
+    )
+  }
+
+  /** Write every crawled page to its own Markdown file, plus an index. */
+  private async saveCrawl(job: CrawlJob) {
+    let host = "site"
+    try {
+      const u = new URL(job.url)
+      host = `${u.hostname}${u.pathname}`
+    } catch {
+      // Keep "site".
+    }
+    const dir = `downloads/crawls/${fileStamp(job.startedAt)}-${slugify(host, 40)}`
+    const index: string[] = []
+    const skipped: Record<string, number> = {}
+    let pages = 0
+    let cursor: string | undefined
+    for (let batch = 0; batch < MAX_CRAWL_PAGES / CRAWL_PAGE_SIZE; batch++) {
+      const query = new URLSearchParams({ limit: String(CRAWL_PAGE_SIZE) })
+      if (cursor) query.set("cursor", cursor)
+      const res = await this.crawlRequest(`/${job.id}?${query}`)
+      if (!res.ok) break
+      const body = (await res.json()) as {
+        result?: { records?: CrawlRecord[]; cursor?: string | number | null }
+      }
+      const records = body.result?.records ?? []
+      for (const record of records) {
+        if (record.status !== "completed" || !record.markdown) {
+          skipped[record.status] = (skipped[record.status] ?? 0) + 1
+          continue
+        }
+        pages += 1
+        let path = record.url
+        try {
+          path = new URL(record.url).pathname
+        } catch {
+          // Keep the raw URL.
+        }
+        const title = record.metadata?.title?.trim() || record.url
+        const file = `${String(pages).padStart(3, "0")}-${slugify(path, 50)}.md`
+        await this.saveFile(
+          `${dir}/${file}`,
+          `---\nurl: ${record.url}\ntitle: ${JSON.stringify(title)}\n---\n\n${record.markdown}\n`
+        )
+        index.push(`- [${title.replace(/[[\]]/g, "")}](${file}) ${record.url}`)
+      }
+      const next = body.result?.cursor
+      if (
+        records.length < CRAWL_PAGE_SIZE ||
+        next === undefined ||
+        next === null ||
+        String(next) === cursor
+      ) {
+        break
+      }
+      cursor = String(next)
+    }
+    const notes = Object.entries(skipped).map(([s, n]) => `${n} ${s}`)
+    const indexPath = await this.saveFile(
+      `${dir}/index.md`,
+      [
+        `# Crawl of ${job.url}`,
+        "",
+        `Purpose: ${job.purpose}`,
+        `Pages saved: ${pages}${notes.length ? ` (not saved: ${notes.join(", ")})` : ""}`,
+        "",
+        ...index,
+        "",
+      ].join("\n")
+    )
+    return { pages, index: indexPath, skipped: notes }
   }
 
   /** Inbound mail to <user>.<bot>@EMAIL_DOMAIN, routed in `src/server.ts`. */
@@ -1954,20 +2246,32 @@ export class BotAgent extends Think<Env, BotState> {
     await this.report({ name })
   }
 
-  private async addRoutine(input: Omit<Routine, "id">): Promise<Routine> {
-    const id = crypto.randomUUID().slice(0, 8)
+  private async scheduleRoutine(routine: Routine) {
     const payload: RoutinePayload = {
-      id,
-      name: input.name,
-      prompt: input.prompt,
-      kind: input.kind,
+      id: routine.id,
+      name: routine.name,
+      prompt: routine.prompt,
+      kind: routine.kind,
+      ...(routine.onlyNew ? { onlyNew: true } : {}),
     }
-    const when = input.kind === "cron" ? input.when : new Date(input.when)
+    const when = routine.kind === "cron" ? routine.when : new Date(routine.when)
     if (when instanceof Date && Number.isNaN(when.getTime())) {
-      throw new Error(`Invalid date: ${input.when}`)
+      throw new Error(`Invalid date: ${routine.when}`)
     }
     await this.schedule(when, "runRoutine", payload)
-    const routine: Routine = { id, ...input }
+  }
+
+  private async cancelRoutineSchedule(id: string) {
+    const schedules = this.getSchedules<RoutinePayload>()
+    const match = schedules.find(
+      (s) => s.callback === "runRoutine" && s.payload.id === id
+    )
+    if (match) await this.cancelSchedule(match.id)
+  }
+
+  private async addRoutine(input: Omit<Routine, "id">): Promise<Routine> {
+    const routine: Routine = { id: crypto.randomUUID().slice(0, 8), ...input }
+    await this.scheduleRoutine(routine)
     this.setState({
       ...this.state,
       routines: [...this.state.routines, routine],
@@ -1975,12 +2279,38 @@ export class BotAgent extends Think<Env, BotState> {
     return routine
   }
 
+  private async updateRoutine(
+    id: string,
+    patch: Partial<Omit<Routine, "id">>
+  ): Promise<Routine | null> {
+    const current = this.state.routines.find((r) => r.id === id)
+    if (!current) return null
+    const next: Routine = { ...current }
+    if (patch.name?.trim()) next.name = patch.name.trim()
+    if (patch.prompt?.trim()) next.prompt = patch.prompt.trim()
+    if (patch.when && patch.kind) {
+      next.when = patch.when
+      next.kind = patch.kind
+    }
+    if (patch.onlyNew !== undefined) {
+      if (patch.onlyNew) next.onlyNew = true
+      else delete next.onlyNew
+    }
+    const stale = this.getSchedules<RoutinePayload>()
+      .filter((s) => s.callback === "runRoutine" && s.payload.id === id)
+      .map((s) => s.id)
+    // Schedule (and so validate) the new one before dropping the old.
+    await this.scheduleRoutine(next)
+    for (const scheduleId of stale) await this.cancelSchedule(scheduleId)
+    this.setState({
+      ...this.state,
+      routines: this.state.routines.map((r) => (r.id === id ? next : r)),
+    })
+    return next
+  }
+
   private async removeRoutine(id: string) {
-    const schedules = this.getSchedules<RoutinePayload>()
-    const match = schedules.find(
-      (s) => s.callback === "runRoutine" && s.payload.id === id
-    )
-    if (match) await this.cancelSchedule(match.id)
+    await this.cancelRoutineSchedule(id)
     const had = this.state.routines.some((r) => r.id === id)
     this.setState({
       ...this.state,
@@ -2182,6 +2512,34 @@ export class BotAgent extends Think<Env, BotState> {
         return entry.type === "dir" ? `${relative}/` : relative
       })
       .filter((path) => path !== "" && path !== "/")
+  }
+
+  /** An image or PDF from the workspace, for previews in the thread and Files pane. */
+  @callable()
+  async readFileData(
+    path: string
+  ): Promise<{ mediaType: string; base64: string }> {
+    const normalized = `/${path.replace(/^\/+/, "")}`
+    if (
+      !normalized.startsWith(`${WORKSPACE_ROOT}/`) ||
+      normalized.split("/").includes("..")
+    ) {
+      throw new Error("Not a workspace file")
+    }
+    const ext = normalized.slice(normalized.lastIndexOf(".") + 1).toLowerCase()
+    const mediaType = MIME_TYPES[ext]
+    if (!mediaType || !/^(image\/|application\/pdf)/.test(mediaType)) {
+      throw new Error("Only images and PDFs can be previewed")
+    }
+    const stat = await this.workspace.fs.stat(normalized)
+    if (stat.size > MAX_FILE_DATA_BYTES) throw new Error("File is too large")
+    const stream = await this.workspace.fs.readFile(normalized)
+    const bytes = new Uint8Array(await new Response(stream).arrayBuffer())
+    let binary = ""
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+    }
+    return { mediaType, base64: btoa(binary) }
   }
 
   @callable()

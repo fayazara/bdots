@@ -3,36 +3,32 @@
  * free of server-only imports (`cloudflare:workers`, agent classes).
  */
 
-import type { BotAvatarType } from "bot-avatars"
+import type { RobotHeadShape } from "robot-heads"
 
 export type BotStatus = "idle" | "thinking" | "working" | "action_needed"
 
 /**
- * Avatar bodies from `bot-avatars`, in the order new bots receive them. Each
- * has its own colour. Listed here (rather than imported) so the Durable
- * Objects do not bundle the canvas renderer.
+ * `robot-heads` looks (a head shape and a shell colour), in the order new bots
+ * receive them. Listed here (rather than imported) so the Durable Objects do
+ * not bundle the canvas renderer.
  */
-export const BOT_AVATARS = [
-  "circle",
-  "blob",
-  "clover",
-  "star",
-  "flower",
-  "ghost",
-  "drop",
-  "hexagon",
-  "cat",
-  "cloud",
-  "pebble",
-  "triangle",
-  "square",
-  "pill",
-  "droid",
-  "alien",
-  "mech",
-  "puddle",
-] as const satisfies readonly BotAvatarType[]
-export type BotAvatarKind = (typeof BOT_AVATARS)[number]
+export const BOT_AVATAR_LOOKS = {
+  "blue-rectangle": { shape: "rectangle", color: "#2b49a3" },
+  "coral-circle": { shape: "circle", color: "#e0563f" },
+  "green-hexagon": { shape: "hexagon", color: "#2f8f5b" },
+  "violet-square": { shape: "square", color: "#6b46c1" },
+  "amber-rectangle": { shape: "rectangle", color: "#d98a1c" },
+  "teal-circle": { shape: "circle", color: "#1f8a99" },
+  "pink-hexagon": { shape: "hexagon", color: "#d6457f" },
+  "graphite-square": { shape: "square", color: "#3d4452" },
+  "red-rectangle": { shape: "rectangle", color: "#b8323a" },
+  "indigo-circle": { shape: "circle", color: "#3f3fb0" },
+  "lime-hexagon": { shape: "hexagon", color: "#6e9a1f" },
+  "sky-square": { shape: "square", color: "#2f86d6" },
+} as const satisfies Record<string, { shape: RobotHeadShape; color: string }>
+
+export type BotAvatarKind = keyof typeof BOT_AVATAR_LOOKS
+export const BOT_AVATARS = Object.keys(BOT_AVATAR_LOOKS) as BotAvatarKind[]
 
 /** One row of the sidebar. Owned by the UserHub, updated by each bot. */
 export interface BotSummary {
@@ -133,6 +129,8 @@ export interface Routine {
   /** Cron expression, or an ISO date for a one-off. */
   when: string
   kind: "cron" | "once"
+  /** Only report what earlier runs did not, and stay quiet otherwise. */
+  onlyNew?: boolean
 }
 
 /** How a bot works on its own between conversations. */
@@ -251,8 +249,8 @@ export interface BotState {
  * thread hides the trigger and shows only what the bot chose to say.
  */
 export interface MessageOrigin {
-  kind: "bot" | "routine" | "check-in" | "email" | "webhook" | "app"
-  /** Bot or routine name, email sender, webhook source, or app name. */
+  kind: "bot" | "routine" | "check-in" | "email" | "webhook" | "app" | "crawl"
+  /** Bot or routine name, email sender, webhook source, app name, or crawled host. */
   name: string
   avatar?: BotAvatarKind
 }

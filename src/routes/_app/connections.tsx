@@ -65,7 +65,7 @@ function SecretField({
         spellCheck={false}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={`${FIELD} h-8 font-mono text-[13px]`}
+        className={`${FIELD} h-8 min-w-0 font-mono text-[13px]`}
       />
       <RowAction
         label={shown ? "Hide value" : "Show value"}
@@ -178,7 +178,7 @@ function AddConnection() {
               spellCheck={false}
               value={row.name}
               onChange={(e) => update(row.key, { name: e.target.value })}
-              className={`${FIELD} h-8 w-48 shrink-0 font-mono text-[13px]`}
+              className={`${FIELD} h-8 w-48! shrink-0 font-mono text-[13px]`}
             />
             <SecretField
               label={`Value for ${row.name || "header"}`}
