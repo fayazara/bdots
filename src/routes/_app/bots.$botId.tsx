@@ -6,6 +6,7 @@ import {
   createFileRoute,
   redirect,
   useMatchRoute,
+  useNavigate,
 } from "@tanstack/react-router"
 import { useAgent } from "agents/react"
 import { useAgentChat } from "@cloudflare/think/react"
@@ -20,7 +21,8 @@ import { Composer } from "@/components/composer"
 import { ComputerPanel } from "@/components/computer-panel"
 import { SettingsPanel } from "@/components/settings-panel"
 import { SidePanel } from "@/components/side-panel"
-import { SlideShell, useLatchedWhileClosing } from "@/components/slide-shell"
+import { useLatchedWhileClosing } from "@/components/slide-shell"
+import { SplitView } from "@/components/split-view"
 import { Thread } from "@/components/thread"
 import { BotContext } from "@/lib/bot-context"
 import { useHub } from "@/lib/hub-context"
@@ -121,7 +123,8 @@ function BotLayout({
   const panel = computerOpen ? "computer" : settingsOpen ? "settings" : null
   // Keep the closing panel's content on screen while it slides away.
   const shownPanel = useLatchedWhileClosing(panel, panel !== null)
-  const { sidebarOpen, toggleSidebar } = useLayout()
+  const { sidebarOpen, toggleSidebar, widths, setWidth } = useLayout()
+  const navigate = useNavigate()
   const context = useMemo(
     () => ({ botId, state, agent }),
     [botId, state, agent]
@@ -129,59 +132,75 @@ function BotLayout({
 
   return (
     <BotContext.Provider value={context}>
-      <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="col-header relative justify-between">
-          <Tooltip
-            content={sidebarOpen ? "Hide bots" : "Show bots"}
-            render={
-              <button
-                type="button"
-                onClick={toggleSidebar}
-                aria-label={sidebarOpen ? "Hide bots" : "Show bots"}
-                aria-pressed={!sidebarOpen}
-                className="icon-btn"
+      <SplitView
+        id="bot"
+        side="right"
+        open={panel !== null}
+        width={widths.panel ?? "44vw"}
+        minWidth={360}
+        maxWidth="70%"
+        mainMinWidth={420}
+        onWidthChange={(px) => setWidth("panel", px)}
+        onClose={() => void navigate({ to: "/bots/$botId", params: { botId } })}
+        panel={
+          shownPanel === "computer" ? (
+            <ComputerPanel />
+          ) : shownPanel === "settings" ? (
+            <SidePanel title="Settings">
+              <SettingsPanel />
+            </SidePanel>
+          ) : null
+        }
+      >
+        <section className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+          <header className="col-header relative justify-between">
+            <Tooltip
+              content={sidebarOpen ? "Hide bots" : "Show bots"}
+              render={
+                <button
+                  type="button"
+                  onClick={toggleSidebar}
+                  aria-label={sidebarOpen ? "Hide bots" : "Show bots"}
+                  aria-pressed={!sidebarOpen}
+                  className="icon-btn"
+                >
+                  <SidebarSimpleIcon size={20} />
+                </button>
+              }
+            />
+            {/* The bot's name floats in the middle, like a window title. */}
+            <div className="absolute left-1/2 flex h-9 max-w-[50%] -translate-x-1/2 items-center gap-2 rounded-full bg-kumo-base pr-4 pl-1.5 shadow-[0_0_0_1px_var(--color-kumo-line),0_1px_2px_oklch(0_0_0/0.04),0_2px_8px_oklch(0_0_0/0.04)]">
+              <BotAvatar
+                avatar={state.avatar}
+                status={state.status}
+                size={30}
+              />
+              <h1 className="truncate text-[15px] font-medium text-kumo-default">
+                {state.name}
+              </h1>
+            </div>
+            <div className="flex items-center gap-1">
+              <PanelLink
+                to="/bots/$botId/settings"
+                label="Settings"
+                active={settingsOpen}
+                botId={botId}
               >
-                <SidebarSimpleIcon size={20} />
-              </button>
-            }
-          />
-          {/* The bot's name floats in the middle, like a window title. */}
-          <div className="absolute left-1/2 flex h-9 max-w-[50%] -translate-x-1/2 items-center gap-2 rounded-full bg-kumo-base pr-4 pl-1.5 shadow-[0_0_0_1px_var(--color-kumo-line),0_1px_2px_oklch(0_0_0/0.04),0_2px_8px_oklch(0_0_0/0.04)]">
-            <BotAvatar avatar={state.avatar} status={state.status} size={30} />
-            <h1 className="truncate text-[15px] font-medium text-kumo-default">
-              {state.name}
-            </h1>
-          </div>
-          <div className="flex items-center gap-1">
-            <PanelLink
-              to="/bots/$botId/settings"
-              label="Settings"
-              active={settingsOpen}
-              botId={botId}
-            >
-              <GearSixIcon size={20} />
-            </PanelLink>
-            <PanelLink
-              to="/bots/$botId/computer"
-              label="Computer"
-              active={computerOpen}
-              botId={botId}
-            >
-              <ComputerIcon size={20} />
-            </PanelLink>
-          </div>
-        </header>
-        {children}
-      </section>
-      <SlideShell open={panel !== null} side="right">
-        {shownPanel === "computer" ? (
-          <ComputerPanel />
-        ) : shownPanel === "settings" ? (
-          <SidePanel title="Settings">
-            <SettingsPanel />
-          </SidePanel>
-        ) : null}
-      </SlideShell>
+                <GearSixIcon size={20} />
+              </PanelLink>
+              <PanelLink
+                to="/bots/$botId/computer"
+                label="Computer"
+                active={computerOpen}
+                botId={botId}
+              >
+                <ComputerIcon size={20} />
+              </PanelLink>
+            </div>
+          </header>
+          {children}
+        </section>
+      </SplitView>
       {/* Panel routes only exist for their URLs; the panels render above. */}
       <Outlet />
     </BotContext.Provider>

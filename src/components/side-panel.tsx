@@ -21,7 +21,7 @@ export function SidePanel({
   return (
     <aside
       aria-label={title}
-      className="flex h-full flex-col border-l border-kumo-line bg-kumo-canvas"
+      className="flex h-full flex-col bg-kumo-canvas"
     >
       <div className="col-header justify-between">
         {toolbar ?? (

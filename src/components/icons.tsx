@@ -30,7 +30,7 @@ import {
   RepeatIcon as Repeat,
   Search01Icon as Search,
   Settings02Icon as Settings,
-  SidebarLeftIcon as SidebarLeft,
+  PanelLeft as SidebarLeft,
   StopIcon as Stop,
   TeachingIcon as Teaching,
   Tick02Icon as Tick,

@@ -179,7 +179,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex h-full w-full flex-col border-r border-kumo-line">
+    <aside className="flex h-full w-full flex-col">
       <div className="col-header">
         {/* The 28px button sits 4px inside the 36px pill. */}
         <div className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full bg-(--fill-hover) pr-1 pl-3 text-kumo-subtle focus-within:ring-2 focus-within:ring-kumo-focus">

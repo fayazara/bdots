@@ -3,7 +3,8 @@ import { getRequest } from "@tanstack/react-start/server"
 import { getAgentByName } from "agents"
 import { env } from "cloudflare:workers"
 import { DEMO_USER_ID, userIdFromRequest } from "@/lib/auth"
-import { SIDEBAR_COOKIE } from "@/lib/layout-context"
+import { SIDEBAR_COOKIE, parseWidths } from "@/lib/layout-context"
+import type { PanelWidths } from "@/lib/layout-context"
 import { botInstanceName } from "@/lib/types"
 import type { BotState, HubState } from "@/lib/types"
 import type { BotAgent } from "@/agents/bot-agent"
@@ -38,6 +39,7 @@ export const getHubSnapshot = createServerFn().handler(
     viewer: Viewer
     hub: HubState
     sidebarOpen: boolean
+    widths: PanelWidths
   }> => {
     const request = getRequest()
     const viewer = viewerFromRequest(request)
@@ -47,7 +49,12 @@ export const getHubSnapshot = createServerFn().handler(
       env.UserHub as unknown as DurableObjectNamespace<UserHub>,
       viewer.id
     )
-    return { viewer, hub: await hub.snapshot(), sidebarOpen }
+    return {
+      viewer,
+      hub: await hub.snapshot(),
+      sidebarOpen,
+      widths: parseWidths(cookie),
+    }
   }
 )
 

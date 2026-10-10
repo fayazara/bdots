@@ -19,6 +19,12 @@
 }
 
 @layer base {
+  * {
+    scrollbar-color: var(--color-kumo-interact) transparent;
+    scrollbar-width: thin;
+    -webkit-tap-highlight-color: transparent;
+  }
+
   html {
     font-family:
       system-ui,
@@ -172,8 +178,6 @@
   --panel-ease: var(--ease-smooth-out);
   --panel-travel: 24px;
   --panel-blur: var(--blur-small);
-  --panel-width: clamp(400px, 44vw, 760px);
-  --sidebar-width: 300px;
 
   /* Shimmer text (thinking / typing labels) */
   --shimmer-dur: 2000ms;
@@ -246,49 +250,94 @@
 }
 
 /*
- * Sliding panels. The shell animates its width so the chat card beside it
- * resizes with the motion; the content inside keeps its full width and
- * slides, fades and un-blurs into place. Closing is faster than opening.
+ * Split views (sidebar | main, thread | panel), built on
+ * react-resizable-panels. Opening and closing resize the panel; while that
+ * happens the group carries data-animating so flex-grow eases, and the
+ * content inside keeps its open width and slides, fades and un-blurs.
+ * Dragging the line resizes without animation. Closing is faster.
  */
-.slide-shell {
-  flex-shrink: 0;
-  overflow: hidden;
-  width: 0;
-  transition: width var(--panel-close-dur) var(--panel-ease);
+.split-view[data-animating] > [data-panel] {
+  transition: flex-grow var(--panel-open-dur) var(--panel-ease);
 }
 
-.slide-shell[data-open="true"] {
-  width: var(--slide-width);
-  transition-duration: var(--panel-open-dur);
+.split-view[data-animating="close"] > [data-panel] {
+  transition-duration: var(--panel-close-dur);
 }
 
-.slide-shell > .slide-content {
-  width: var(--slide-width);
+.split-content {
+  width: var(--split-width);
   height: 100%;
+  flex-shrink: 0;
   opacity: 0;
   filter: blur(var(--panel-blur));
-  transform: translateX(calc(var(--panel-travel) * var(--slide-from)));
+  transform: translateX(calc(var(--panel-travel) * var(--split-from)));
   transition:
     transform var(--panel-close-dur) var(--panel-ease),
     opacity var(--panel-close-dur) var(--panel-ease),
     filter var(--panel-close-dur) var(--panel-ease);
 }
 
-.slide-shell[data-open="true"] > .slide-content {
+.split-content[data-side="left"] {
+  --split-from: -1;
+}
+
+.split-content[data-side="right"] {
+  --split-from: 1;
+}
+
+.split-content[data-open="true"] {
   opacity: 1;
   filter: blur(0);
   transform: translateX(0);
   transition-duration: var(--panel-open-dur);
 }
 
-.slide-shell[data-side="left"] {
-  --slide-width: var(--sidebar-width);
-  --slide-from: -1;
+/*
+ * The line between panels. Hovering shows a grip on the line at the
+ * pointer's height (--grip-y, set from script); it follows while dragging.
+ */
+.resize-handle {
+  position: relative;
+  z-index: 10;
+  width: 1px;
+  background: var(--color-kumo-line);
+  outline: none;
 }
 
-.slide-shell[data-side="right"] {
-  --slide-width: var(--panel-width);
-  --slide-from: 1;
+.resize-handle[data-separator="disabled"] {
+  background: transparent;
+}
+
+.resize-grip {
+  position: absolute;
+  top: var(--grip-y, 50%);
+  left: 50%;
+  width: 4px;
+  height: 28px;
+  border-radius: 999px;
+  background: light-dark(oklch(0% 0 0 / 0.28), oklch(100% 0 0 / 0.32));
+  box-shadow: 0 0 0 2px var(--color-kumo-base);
+  opacity: 0;
+  transform: translate(-50%, -50%) scaleY(0.6);
+  transition:
+    opacity 150ms ease,
+    transform 150ms var(--ease-smooth-out),
+    background-color 150ms ease;
+  pointer-events: none;
+}
+
+.resize-handle:is(
+    [data-separator="hover"],
+    [data-separator="active"],
+    [data-separator="focus"]
+  )
+  .resize-grip {
+  opacity: 1;
+  transform: translate(-50%, -50%);
+}
+
+.resize-handle[data-separator="active"] .resize-grip {
+  background: light-dark(oklch(0% 0 0 / 0.5), oklch(100% 0 0 / 0.55));
 }
 
 /* Shimmer: a highlight band sweeps across muted text while work runs. */
@@ -462,8 +511,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .slide-shell,
-  .slide-shell > .slide-content,
+  .split-view > [data-panel],
+  .split-content,
+  .resize-grip,
   .t-icon-swap .t-icon,
   .t-tabs-pill,
   .t-tab,
@@ -473,7 +523,7 @@
     transition: none !important;
   }
 
-  .slide-shell > .slide-content {
+  .split-content {
     transform: none !important;
     filter: none !important;
   }
@@ -485,18 +535,5 @@
   .pressable:active,
   .icon-btn:active {
     transform: none;
-  }
-}
-
-/*
- * Right-hand panels mount when they open, so they need a starting pose to
- * slide in from. The bot sidebar is always mounted and must not animate on
- * page load.
- */
-.slide-shell[data-side="right"][data-open="true"] > .slide-content {
-  @starting-style {
-    opacity: 0;
-    filter: blur(var(--panel-blur));
-    transform: translateX(calc(var(--panel-travel) * var(--slide-from)));
   }
 }
