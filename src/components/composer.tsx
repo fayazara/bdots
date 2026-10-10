@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Button } from "@cloudflare/kumo/components/button"
 import { DropdownMenu } from "@cloudflare/kumo/components/dropdown"
 import { Loader } from "@cloudflare/kumo/components/loader"
+import { Tooltip } from "@cloudflare/kumo/components/tooltip"
 import {
   ArrowUpIcon,
   ChalkboardTeacherIcon,
@@ -97,45 +98,66 @@ function AttachmentCard({
     if (!thumb) setTimeout(() => URL.revokeObjectURL(url), 60_000)
   }
 
+  const failed = status === "error"
+  const uploading = status === "uploading"
+  const error = attachment.error ?? "Upload failed"
+
+  const body = (
+    <button
+      type="button"
+      onClick={preview}
+      title={failed ? undefined : file.name}
+      aria-label={
+        failed
+          ? `${file.name} didn't upload: ${error}`
+          : uploading
+            ? `${file.name}, uploading`
+            : `${file.name}, ${ext}, preview`
+      }
+      className="composer-card-body"
+    >
+      {thumb && !failed ? (
+        // A photo speaks for itself: no name over it.
+        <>
+          <img src={thumb} alt="" className="composer-card-img" />
+          {uploading ? (
+            <span className="composer-card-spinner">
+              <Loader size="sm" />
+            </span>
+          ) : null}
+        </>
+      ) : (
+        <>
+          {/* Uploading and failed states take the file icon's place. */}
+          <span
+            className={`flex size-[22px] items-center ${failed ? "text-kumo-warning" : "text-kumo-subtle"}`}
+          >
+            {failed ? (
+              <WarningIcon size={22} />
+            ) : uploading ? (
+              <Loader size="sm" />
+            ) : (
+              kind.icon
+            )}
+          </span>
+          <span className="composer-card-label">
+            <span className="truncate text-[13px] leading-[1.3] font-medium">
+              {baseName(file.name)}
+            </span>
+            <span
+              className={`truncate text-[11px] tabular-nums ${failed ? "text-kumo-warning" : "text-kumo-subtle"}`}
+            >
+              {failed ? "Didn't upload" : uploading ? "Uploading…" : caption}
+            </span>
+          </span>
+        </>
+      )}
+    </button>
+  )
+
   return (
     <li className="composer-card" data-status={status}>
-      <button
-        type="button"
-        onClick={preview}
-        title={attachment.error ?? file.name}
-        aria-label={`${file.name}, ${ext}, preview`}
-        className="composer-card-body"
-      >
-        {thumb ? (
-          // A photo speaks for itself: no name over it.
-          <img src={thumb} alt="" className="composer-card-img" />
-        ) : (
-          <>
-            <span className="text-kumo-subtle">{kind.icon}</span>
-            <span className="composer-card-label">
-              <span className="truncate text-[13px] leading-[1.3] font-medium">
-                {baseName(file.name)}
-              </span>
-              <span className="text-[11px] text-kumo-subtle tabular-nums">
-                {caption}
-              </span>
-            </span>
-          </>
-        )}
-      </button>
-      {status === "uploading" ? (
-        <span className="composer-card-status" aria-label="Uploading">
-          <Loader size="sm" />
-        </span>
-      ) : status === "error" ? (
-        <span
-          className="composer-card-status text-kumo-warning"
-          role="img"
-          aria-label={attachment.error ?? "Upload failed"}
-        >
-          <WarningIcon size={16} />
-        </span>
-      ) : null}
+      {failed ? <Tooltip content={error} render={body} /> : body}
       <button
         type="button"
         onClick={onRemove}

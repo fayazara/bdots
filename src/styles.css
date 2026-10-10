@@ -503,22 +503,17 @@
   gap: 2px;
 }
 
-.composer-card[data-status="uploading"] .composer-card-body {
-  opacity: 0.6;
+/* An image keeps its photo while it uploads, dimmed under a spinner. */
+.composer-card[data-status="uploading"] .composer-card-img {
+  opacity: 0.55;
 }
 
-.composer-card-status {
+.composer-card-spinner {
   position: absolute;
-  top: 8px;
-  left: 8px;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 9999px;
-  background: color-mix(in oklab, var(--color-kumo-base) 85%, transparent);
-  backdrop-filter: blur(8px);
 }
 
 .composer-card-remove {
