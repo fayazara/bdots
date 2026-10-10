@@ -15,7 +15,10 @@ import {
   AiBrowserIcon as AiBrowser,
   Delete02Icon as Delete,
   Download04Icon as Download,
+  AlignBoxTopLeftIcon as File,
+  FileZipIcon as FileZip,
   Globe02Icon as Globe,
+  Image01Icon as Image,
   Pdf01Icon as Pdf,
   WebDesign01Icon as WebDesign,
   LeftToRightListBulletIcon as ListBullet,
@@ -26,10 +29,10 @@ import {
   NotificationOff01Icon as NotificationOff,
   Plug01Icon as Plug,
   PowerIcon as Power,
-  RefreshIcon as Refresh,
+  Refresh01Icon as Refresh,
   RepeatIcon as Repeat,
   Search01Icon as Search,
-  Settings02Icon as Settings,
+  Settings03Icon as Settings,
   PanelLeft as SidebarLeft,
   StopIcon as Stop,
   TeachingIcon as Teaching,
@@ -82,12 +85,15 @@ export const CheckIcon = icon(Tick, "CheckIcon")
 export const ClockIcon = icon(Clock, "ClockIcon")
 export const CopyIcon = icon(Copy, "CopyIcon")
 export const DownloadIcon = icon(Download, "DownloadIcon")
+export const FileIcon = icon(File, "FileIcon")
 export const FilePdfIcon = icon(Pdf, "FilePdfIcon")
+export const FileZipIcon = icon(FileZip, "FileZipIcon")
 export const CrawlIcon = icon(WebDesign, "CrawlIcon")
 export const EnvelopeSimpleIcon = icon(Mail, "EnvelopeSimpleIcon")
 export const EyeIcon = icon(View, "EyeIcon")
 export const GearSixIcon = icon(Settings, "GearSixIcon")
 export const GlobeIcon = icon(Globe, "GlobeIcon")
+export const ImageIcon = icon(Image, "ImageIcon")
 export const ListBulletsIcon = icon(ListBullet, "ListBulletsIcon")
 export const MagnifyingGlassIcon = icon(Search, "MagnifyingGlassIcon")
 export const ComputerIcon = icon(AiBrowser, "ComputerIcon")
