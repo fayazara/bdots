@@ -251,6 +251,7 @@ function LiveBot({
         bot={state}
         messages={chat.messages}
         busy={busy}
+        botId={botId}
         getLiveView={getLiveView}
         readFile={readFile}
         onApproval={onApproval}

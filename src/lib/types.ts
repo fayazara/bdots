@@ -262,6 +262,8 @@ export interface MessageMeta {
   at?: number
   /** Part of a turn the user did not start. */
   background?: boolean
+  /** On a finished reply: how long the bot worked on it. */
+  durationMs?: number
 }
 
 /** A background turn ends with exactly this when there is nothing to say. */

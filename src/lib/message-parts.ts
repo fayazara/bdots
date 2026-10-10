@@ -1,6 +1,6 @@
 import type { UIMessage } from "ai"
 import { NO_UPDATE } from "@/lib/types"
-import type { MessageMeta, MessageOrigin } from "@/lib/types"
+import type { MessageMeta, MessageOrigin, Routine } from "@/lib/types"
 
 export type ToolCallState = "running" | "waiting" | "done" | "error" | "denied"
 
@@ -23,6 +23,54 @@ export type Block =
   | { kind: "steps"; key: string; calls: ToolCall[] }
   | { kind: "approval"; key: string; call: ToolCall }
   | { kind: "capture"; key: string; call: ToolCall; capture: Capture }
+  | { kind: "routine"; key: string; routine: Routine; updated: boolean }
+
+/** Something the bot did on the way to its reply: folded under "Worked for". */
+export type WorkItem =
+  | { kind: "note"; key: string; text: string }
+  | { kind: "step"; key: string; call: ToolCall }
+
+/** A reply split into the work behind it and what the user should see. */
+export interface TurnView {
+  work: WorkItem[]
+  /** The reply, cards and events, in order. */
+  shown: Block[]
+}
+
+/**
+ * The last text block, when nothing but events follows it, is the reply.
+ * Any other text is narration ("Let me check…") and joins the steps in the
+ * work group. Hidden bookkeeping calls (mark_reported) leave no block, so
+ * narration before them still counts as narration.
+ */
+export function toTurn(blocks: Block[]): TurnView {
+  const lastText = blocks.findLastIndex((b) => b.kind === "text")
+  const lastTool = blocks.findLastIndex(
+    (b) => b.kind !== "text" && b.kind !== "event"
+  )
+  const reply = lastText > lastTool ? lastText : -1
+  const hasWork = lastTool !== -1
+  const work: WorkItem[] = []
+  const shown: Block[] = []
+  blocks.forEach((block, index) => {
+    if (block.kind === "text" && hasWork && index !== reply) {
+      work.push({ kind: "note", key: block.key, text: block.text })
+    } else if (block.kind === "steps") {
+      for (const call of block.calls) {
+        work.push({ kind: "step", key: call.id, call })
+      }
+    } else {
+      shown.push(block)
+    }
+  })
+  return { work, shown }
+}
+
+function routineOf(call: ToolCall): Routine | null {
+  const out = call.output as { scheduled?: Routine; updated?: Routine } | null
+  const routine = out?.scheduled ?? out?.updated
+  return routine && typeof routine.id === "string" ? routine : null
+}
 
 /** A screenshot or PDF a tool saved to the bot's files. */
 export interface Capture {
@@ -137,6 +185,22 @@ export function toBlocks(message: UIMessage): Block[] {
     }
     // Bookkeeping the user does not need to see.
     if (call.name === "mark_reported" || call.name === "was_reported") return
+
+    if (
+      (call.name === "schedule_routine" || call.name === "update_routine") &&
+      call.state === "done"
+    ) {
+      const routine = routineOf(call)
+      if (routine) {
+        blocks.push({
+          kind: "routine",
+          key,
+          routine,
+          updated: call.name === "update_routine",
+        })
+        return
+      }
+    }
 
     if (CAPTURE_TOOLS.has(call.name) && call.state === "done") {
       const capture = captureOf(call)

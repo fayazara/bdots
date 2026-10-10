@@ -65,11 +65,11 @@ export function CaptureCard({
       <figure className="w-full max-w-[640px]">
         <div className="overflow-hidden rounded-2xl bg-kumo-recessed outline outline-1 -outline-offset-1 outline-black/[0.06]">
           {url ? (
-            <a href={url} target="_blank" rel="noreferrer">
+            <a href={url} target="_blank" rel="noreferrer" title={capture.path}>
               <img
                 src={url}
                 alt={`Screenshot saved as ${name}`}
-                className="block max-h-[480px] w-full object-cover object-top"
+                className="block max-h-[420px] w-full object-cover object-top"
               />
             </a>
           ) : (
@@ -84,9 +84,6 @@ export function CaptureCard({
             </div>
           )}
         </div>
-        <figcaption className="mt-1.5 truncate px-1 text-xs text-kumo-subtle">
-          {capture.path}
-        </figcaption>
       </figure>
     )
   }

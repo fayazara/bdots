@@ -23,6 +23,7 @@ import { createBrowserRuntime } from "@cloudflare/think/tools/browser"
 import type { BrowserRuntime } from "@cloudflare/think/tools/browser"
 import { exports } from "cloudflare:workers"
 import { callable, getAgentByName } from "agents"
+import { CHAT_MESSAGE_TYPES } from "agents/chat"
 import type { ContextConfig } from "agents/context"
 import { isAutoReplyEmail } from "agents/email"
 import type { AgentEmail } from "agents/email"
@@ -665,8 +666,32 @@ export class BotAgent extends Think<Env, BotState> {
     ]
   }
 
+  /**
+   * Think freezes the rendered system prompt per bot, so edits to SOUL would
+   * never reach existing bots. Rebuild it once whenever SOUL changes.
+   */
+  private async refreshSoulIfChanged(): Promise<string | null> {
+    let hash = 0
+    for (let i = 0; i < SOUL.length; i++) {
+      hash = (Math.imul(31, hash) + SOUL.charCodeAt(i)) | 0
+    }
+    const fingerprint = `${SOUL.length}:${hash}`
+    if (this.ctx.storage.kv.get<string>("soul_fingerprint") === fingerprint) {
+      return null
+    }
+    try {
+      const system = await this.context.refreshSystemPrompt()
+      this.ctx.storage.kv.put("soul_fingerprint", fingerprint)
+      return system
+    } catch (err) {
+      console.error("Refreshing the system prompt failed", err)
+      return null
+    }
+  }
+
   override async beforeTurn(ctx: TurnContext): Promise<TurnConfig> {
     await this.setStatus("thinking")
+    const system = (await this.refreshSoulIfChanged()) ?? ctx.system
     let others: Awaited<ReturnType<UserHub["listBots"]>> = []
     let catalog: AppCatalog = { apps: [], tools: [] }
     try {
@@ -699,7 +724,7 @@ export class BotAgent extends Think<Env, BotState> {
       })),
     })
     return {
-      instructions: `${ctx.system}\n\n${context}`,
+      instructions: `${system}\n\n${context}`,
       tools: this.#appTools,
     }
   }
@@ -1879,6 +1904,8 @@ export class BotAgent extends Think<Env, BotState> {
       return
     }
 
+    await this.stampDuration(result.message)
+
     const final = background ? finalText(result.message) : ""
     const preview = clip(
       final
@@ -1906,6 +1933,34 @@ export class BotAgent extends Think<Env, BotState> {
       )
     } else if ((background || longTurn) && preview) {
       await this.notify(preview)
+    }
+  }
+
+  /**
+   * Record how long the bot worked on a reply, for the thread's "Worked for"
+   * header. Approval continuations add to the same message, so time spent
+   * waiting on the user is not counted.
+   */
+  private async stampDuration(message: UIMessage) {
+    if (this.#turnStartedAt <= 0) return
+    const meta = metaOf(message)
+    const updated: UIMessage = {
+      ...message,
+      metadata: {
+        ...meta,
+        durationMs: (meta.durationMs ?? 0) + (Date.now() - this.#turnStartedAt),
+      } satisfies MessageMeta,
+    }
+    try {
+      await this.updateMessageInHistory(updated)
+      this.broadcast(
+        JSON.stringify({
+          type: CHAT_MESSAGE_TYPES.MESSAGE_UPDATED,
+          message: updated,
+        })
+      )
+    } catch (err) {
+      console.error("Stamping turn duration failed", err)
     }
   }
 

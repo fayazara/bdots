@@ -6,7 +6,6 @@ import { Button } from "@cloudflare/kumo/components/button"
 import { Loader } from "@cloudflare/kumo/components/loader"
 import {
   AppWindowIcon,
-  CaretDownIcon,
   CaretRightIcon,
   CheckIcon,
   ClockIcon,
@@ -19,6 +18,7 @@ import { BotAvatar } from "@/components/bot-avatar"
 import { CaptureCard } from "@/components/capture-card"
 import { CodeBlock } from "@/components/code-block"
 import { ComputerCard } from "@/components/computer-card"
+import { RoutineSummary } from "@/components/routine-summary"
 import {
   describeCall,
   isQuietReply,
@@ -27,12 +27,13 @@ import {
   originOf,
   stripOriginHeader,
   toBlocks,
+  toTurn,
 } from "@/lib/message-parts"
 import { NO_UPDATE } from "@/lib/types"
 import type { UIMessage } from "ai"
 import type { ReadFileData } from "@/components/capture-card"
 import type { GetLiveView } from "@/components/computer-card"
-import type { Block, ToolCall } from "@/lib/message-parts"
+import type { Block, ToolCall, WorkItem } from "@/lib/message-parts"
 import type { BotState } from "@/lib/types"
 
 export type OnApproval = (
@@ -46,20 +47,96 @@ interface ThreadProps {
   messages: UIMessage[]
   /** A turn is in flight (submitted or streaming). */
   busy: boolean
+  /** For links into the bot's settings (routine cards). */
+  botId?: string
   getLiveView?: GetLiveView
   /** Loads screenshots and PDFs the bot saved. Absent before hydration. */
   readFile?: ReadFileData
   onApproval?: OnApproval
 }
 
+/** Hostname of an absolute http(s) link, for its favicon. */
+function linkHost(href: string | undefined) {
+  if (!href || !/^https?:\/\//i.test(href)) return null
+  try {
+    return new URL(href).hostname
+  } catch {
+    return null
+  }
+}
+
+function Favicon({ host }: { host: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) return null
+  return (
+    <img
+      src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`}
+      alt=""
+      aria-hidden="true"
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="mr-1 inline-block size-[1em] rounded-[3px] align-[-0.125em]"
+    />
+  )
+}
+
+const PROSE = [
+  "bubble-prose text-[15px] leading-[1.65] text-pretty",
+  "[&_p]:my-3 [&_ul]:my-3 [&_ol]:my-3",
+  "[&_strong]:font-semibold",
+  "[&_h1]:mt-5 [&_h1]:mb-2 [&_h1]:text-[17px] [&_h1]:font-semibold",
+  "[&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:text-base [&_h2]:font-semibold",
+  "[&_h3]:mt-4 [&_h3]:mb-1.5 [&_h3]:font-semibold",
+  "[&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:list-disc [&_ul]:pl-5",
+  "[&_li]:my-1.5 [&_li]:pl-1 [&_li]:marker:text-kumo-subtle",
+  "[&_hr]:my-5 [&_hr]:border-kumo-line",
+  "[&_blockquote]:border-l-2 [&_blockquote]:border-kumo-line [&_blockquote]:pl-3 [&_blockquote]:text-kumo-subtle",
+  "[&_code]:rounded-md [&_code]:bg-(--fill-hover) [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[13px]",
+  "[&_pre_code]:rounded-none [&_pre_code]:bg-transparent [&_pre_code]:p-0",
+].join(" ")
+
 function Prose({ text }: { text: string }) {
   return (
-    <div className="bubble-prose space-y-3 text-[15px] leading-6 text-pretty [&_a]:text-kumo-link [&_a]:underline [&_code]:rounded [&_code]:bg-kumo-fill [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[13px] [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:font-semibold [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_pre_code]:rounded-none [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_table]:text-sm [&_td]:border-t [&_td]:border-kumo-line [&_td]:px-2 [&_td]:py-1 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_ul]:list-disc [&_ul]:pl-5">
+    <div className={PROSE}>
       <Markdown
         remarkPlugins={[remarkGfm]}
         components={{
-          a: ({ node: _node, ...props }) => (
-            <a {...props} target="_blank" rel="noreferrer noopener" />
+          a: ({ node: _node, href, children, ...props }) => {
+            const host = linkHost(href)
+            return (
+              <a
+                {...props}
+                href={href}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="font-medium text-kumo-link decoration-1 underline-offset-2 hover:underline"
+              >
+                {host ? <Favicon host={host} /> : null}
+                {children}
+              </a>
+            )
+          },
+          table: ({ node: _node, ...props }) => (
+            <div className="-mx-1 my-3 overflow-x-auto">
+              <table
+                {...props}
+                className="w-full border-collapse text-sm tabular-nums"
+              />
+            </div>
+          ),
+          th: ({ node: _node, style, ...props }) => (
+            <th
+              {...props}
+              style={style}
+              className="border-b border-kumo-line px-3 pt-1 pb-2 text-left align-bottom text-[13px] font-medium whitespace-nowrap text-kumo-subtle"
+            />
+          ),
+          td: ({ node: _node, style, ...props }) => (
+            <td
+              {...props}
+              style={style}
+              className="border-b border-kumo-line px-3 py-2.5 align-top [tr:last-child>&]:border-b-0"
+            />
           ),
           // Fenced blocks get highlighted; inline `code` stays a small chip.
           pre: ({ children }) => <>{children}</>,
@@ -112,49 +189,113 @@ function StepIcon({ state }: { state: ToolCall["state"] }) {
   return <WarningIcon size={14} className="text-kumo-warning" />
 }
 
-/** Compact list of the file, shell, API and read-only web calls in a turn. */
-function Steps({ calls }: { calls: ToolCall[] }) {
-  const [open, setOpen] = useState(false)
-  const running = calls.some((c) => c.state === "running")
-  const current = calls.findLast((c) => c.state === "running") ?? calls.at(-1)
-  if (!current) return null
+function formatDuration(ms: number) {
+  const s = Math.max(1, Math.round(ms / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  return s % 60 ? `${m}m ${s % 60}s` : `${m}m`
+}
 
-  if (calls.length === 1) {
-    return (
-      <div className="flex items-center gap-2 px-1 text-sm text-kumo-subtle">
-        <StepIcon state={current.state} />
-        <span className="truncate">{describeCall(current)}</span>
-      </div>
-    )
-  }
+/** Seconds since `from`, ticking while `on`. */
+function useElapsed(from: number | undefined, on: boolean) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!on) return
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [on])
+  return from ? now - from : undefined
+}
+
+/**
+ * Everything the bot did on the way to its reply, folded into one line:
+ * "Working for 12s" with the current step while it runs, then "Worked for
+ * 37s" that opens into the steps and notes.
+ */
+function WorkGroup({
+  work,
+  live,
+  startedAt,
+  durationMs,
+}: {
+  work: WorkItem[]
+  live: boolean
+  startedAt?: number
+  durationMs?: number
+}) {
+  const [open, setOpen] = useState(false)
+  const hydrated = useHydrated()
+  const elapsed = useElapsed(startedAt, live && hydrated)
+  const steps = work.filter((w) => w.kind === "step")
+  const current =
+    steps.findLast((s) => s.call.state === "running") ?? steps.at(-1)
+  const failed = steps.filter(
+    (s) => s.call.state === "error" || s.call.state === "denied"
+  ).length
+
+  const label = live
+    ? elapsed !== undefined && elapsed >= 1000
+      ? `Working for ${formatDuration(elapsed)}`
+      : "Working"
+    : durationMs
+      ? `Worked for ${formatDuration(durationMs)}`
+      : `${steps.length} ${steps.length === 1 ? "step" : "steps"}`
+
   return (
-    <div className="text-sm text-kumo-subtle">
+    <div className="w-full max-w-[640px] text-sm text-kumo-subtle">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex max-w-full items-center gap-2 rounded-lg px-1 py-0.5 outline-none hover:text-kumo-default focus-visible:ring-2 focus-visible:ring-kumo-focus"
+        className="group flex max-w-full items-center gap-1 rounded-lg py-0.5 pl-1 outline-none hover:text-kumo-default focus-visible:ring-2 focus-visible:ring-kumo-focus"
       >
-        {running ? (
-          <Loader size="sm" />
-        ) : open ? (
-          <CaretDownIcon size={14} />
-        ) : (
-          <CaretRightIcon size={14} />
-        )}
-        <span className="truncate">
-          {running ? describeCall(current) : `${calls.length} steps`}
-        </span>
+        {live ? <ShimmerText text={label} /> : <span>{label}</span>}
+        {!live && failed ? (
+          <span className="text-kumo-warning"> · {failed} failed</span>
+        ) : null}
+        <CaretRightIcon
+          size={14}
+          className={`shrink-0 transition-transform duration-150 ${open ? "rotate-90" : ""}`}
+        />
       </button>
+
+      {live && !open && current ? (
+        <div className="mt-1.5 flex items-center gap-2 pl-1">
+          <StepIcon state={current.call.state} />
+          <span className="truncate">{describeCall(current.call)}</span>
+        </div>
+      ) : null}
+
       {open ? (
-        <ul className="mt-1 space-y-1 pl-1">
-          {calls.map((call) => (
-            <li key={call.id} className="flex items-center gap-2">
-              <StepIcon state={call.state} />
-              <span className="truncate">{describeCall(call)}</span>
-            </li>
-          ))}
-        </ul>
+        <ol className="mt-2 ml-[11px] space-y-2.5 border-l border-kumo-line pb-1 pl-4">
+          {work.map((item) =>
+            item.kind === "step" ? (
+              <li key={item.key} className="flex items-start gap-2">
+                <span className="mt-[3px] shrink-0">
+                  <StepIcon state={item.call.state} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate">
+                    {describeCall(item.call)}
+                  </span>
+                  {item.call.errorText ? (
+                    <span className="mt-0.5 line-clamp-2 block text-xs text-kumo-warning">
+                      {item.call.errorText}
+                    </span>
+                  ) : null}
+                </span>
+              </li>
+            ) : (
+              <li
+                key={item.key}
+                className="text-[13px] leading-5 whitespace-pre-wrap text-kumo-subtle"
+              >
+                {item.text.trim()}
+              </li>
+            )
+          )}
+        </ol>
       ) : null}
     </div>
   )
@@ -207,29 +348,56 @@ function ApprovalCard({
 
 function AssistantMessage({
   blocks,
+  live,
+  startedAt,
+  durationMs,
+  botId,
   latestComputerKey,
   getLiveView,
   readFile,
   onApproval,
 }: {
   blocks: Block[]
+  /** This reply is still being written. */
+  live: boolean
+  startedAt?: number
+  durationMs?: number
+  botId?: string
   latestComputerKey: string | undefined
   getLiveView?: GetLiveView
   readFile?: ReadFileData
   onApproval?: OnApproval
 }) {
+  const { work, shown } = toTurn(blocks)
   return (
     <>
-      {blocks.map((block) => {
+      {work.length ? (
+        <WorkGroup
+          work={work}
+          live={live}
+          startedAt={startedAt}
+          durationMs={durationMs}
+        />
+      ) : null}
+      {shown.map((block) => {
         switch (block.kind) {
           case "text":
             return (
               <div
                 key={block.key}
-                className="w-fit max-w-[85%] rounded-[20px] bg-kumo-tint px-4 py-2.5 text-kumo-default"
+                className="w-fit max-w-[85%] rounded-[22px] bg-kumo-tint px-[18px] py-3 text-kumo-default has-[table]:w-full has-[table]:max-w-full"
               >
                 <Prose text={block.text} />
               </div>
+            )
+          case "routine":
+            return (
+              <RoutineSummary
+                key={block.key}
+                routine={block.routine}
+                updated={block.updated}
+                botId={botId}
+              />
             )
           case "event":
             return <SystemEvent key={block.key}>{block.label}</SystemEvent>
@@ -244,7 +412,7 @@ function AssistantMessage({
               />
             )
           case "steps":
-            return <Steps key={block.key} calls={block.calls} />
+            return null
           case "capture":
             return (
               <CaptureCard
@@ -316,7 +484,7 @@ function UserMessage({ message }: { message: UIMessage }) {
   // Check-ins are invisible: only what the bot chose to say shows up.
   if (origin?.kind === "check-in") return null
   return (
-    <div className="ml-auto w-fit max-w-[75%] rounded-[20px] bg-kumo-contrast px-4 py-2.5 text-[15px] leading-6 text-pretty whitespace-pre-wrap text-kumo-inverse">
+    <div className="ml-auto w-fit max-w-[75%] rounded-[22px] bg-kumo-contrast px-[18px] py-3 text-[15px] leading-[1.65] text-pretty whitespace-pre-wrap text-kumo-inverse">
       {text}
     </div>
   )
@@ -327,6 +495,7 @@ interface Row {
   blocks: Block[]
   /** When the turn started, for time dividers. Older messages have none. */
   at?: number
+  durationMs?: number
 }
 
 function isQuietPrefix(message: UIMessage) {
@@ -366,6 +535,7 @@ export function Thread({
   bot,
   messages,
   busy,
+  botId,
   getLiveView,
   readFile,
   onApproval,
@@ -404,7 +574,12 @@ export function Thread({
         const last = blocks.findLast((b) => b.kind === "text")
         blocks = blocks.filter((b) => b.kind !== "text" || b === last)
       }
-      rows.push({ message, blocks, at: meta.at ?? turnAt })
+      rows.push({
+        message,
+        blocks,
+        at: meta.at ?? turnAt,
+        durationMs: meta.durationMs,
+      })
     }
     return rows
   }, [messages])
@@ -421,11 +596,15 @@ export function Thread({
     if (el && pinned.current) el.scrollTop = el.scrollHeight
   }, [rendered, busy])
 
-  const lastBlocks = rendered.at(-1)?.blocks ?? []
-  const streamingText =
-    busy &&
-    rendered.at(-1)?.message.role === "assistant" &&
-    lastBlocks.at(-1)?.kind === "text"
+  const lastRow = rendered.at(-1)
+  const lastBlocks = lastRow?.blocks ?? []
+  const replying = busy && lastRow?.message.role === "assistant"
+  // Once the reply has text or work to show, it carries its own progress.
+  const showsProgress =
+    replying &&
+    lastBlocks.some(
+      (b) => b.kind === "text" || b.kind === "steps" || b.kind === "computer"
+    )
   const waitingOnUser = bot.status === "action_needed"
 
   return (
@@ -437,8 +616,8 @@ export function Thread({
       }}
       className="min-h-0 flex-1 overflow-y-auto"
     >
-      <div className="mx-auto flex max-w-[820px] flex-col gap-3 px-6 pt-2 pb-6">
-        {rendered.map(({ message, blocks, at }, index) => (
+      <div className="mx-auto flex max-w-[820px] flex-col gap-5 px-6 pt-2 pb-8">
+        {rendered.map(({ message, blocks, at, durationMs }, index) => (
           <div
             key={message.id}
             className={`flex flex-col gap-3 ${isNew(message.id) ? "msg-enter" : ""}`}
@@ -453,6 +632,10 @@ export function Thread({
             ) : (
               <AssistantMessage
                 blocks={blocks}
+                live={replying && index === rendered.length - 1}
+                startedAt={at}
+                durationMs={durationMs}
+                botId={botId}
                 latestComputerKey={latestComputerKey}
                 getLiveView={getLiveView}
                 readFile={readFile}
@@ -461,7 +644,7 @@ export function Thread({
             )}
           </div>
         ))}
-        {busy && !streamingText && !waitingOnUser ? (
+        {busy && !showsProgress && !waitingOnUser ? (
           <div
             className="msg-enter flex items-center gap-2.5 pl-1"
             data-from="bot"
