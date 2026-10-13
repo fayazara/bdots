@@ -3,4 +3,10 @@
 # For production, upload values with: cf deploy --secrets-file <PATH>
 # Bindings (D1, KV, R2, etc.) go in cloudflare.config.ts, NOT here.
 
-# MY_SECRET="example"
+# Web Push keys for bot notifications: npx web-push generate-vapid-keys
+VAPID_PUBLIC_KEY=""
+VAPID_PRIVATE_KEY=""
+
+# Optional: Browser Run API token (permission "Browser Rendering - Edit") for
+# the bot's crawl tool. Also set BROWSER_RUN_ACCOUNT_ID in cloudflare.config.ts.
+BROWSER_RUN_API_TOKEN=""

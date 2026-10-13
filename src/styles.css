@@ -1,10 +1,769 @@
 @source "../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
 @import "@cloudflare/kumo/styles/tailwind";
 @import "tailwindcss";
-@import "@fontsource-variable/inter";
+
+/*
+ * `dark:` follows the app's mode (Kumo's data-mode), not the OS. The app is
+ * light, so without this a dark-mode Mac gets dark switches on a light page.
+ */
+@custom-variant dark (&:where([data-mode="dark"], [data-mode="dark"] *));
+
+/*
+ * Code uses Berkeley Mono when it is installed on the system (never
+ * downloaded), then the platform's own mono font.
+ */
+@theme {
+  --font-mono:
+    "Berkeley Mono", "TX-02", ui-monospace, "SF Mono", SFMono-Regular, Menlo,
+    Monaco, "Cascadia Code", Consolas, "Liberation Mono", monospace;
+}
 
 @layer base {
+  * {
+    scrollbar-color: var(--color-kumo-interact) transparent;
+    scrollbar-width: thin;
+    -webkit-tap-highlight-color: transparent;
+  }
+
   html {
-    font-family: "Inter Variable", sans-serif;
+    font-family:
+      system-ui,
+      -apple-system,
+      "Segoe UI",
+      Roboto,
+      "Helvetica Neue",
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html,
+  body {
+    height: 100%;
+    overscroll-behavior: none;
+  }
+}
+
+/* Hugeicons: a 1.5px stroke on screen whatever the icon's size. */
+.hi [stroke-width] {
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Markdown inside chat bubbles: tighter than Streamdown's document defaults. */
+.bubble-prose > *:first-child {
+  margin-top: 0;
+}
+
+.bubble-prose > *:last-child {
+  margin-bottom: 0;
+}
+
+/*
+ * Kumo's primary button, recoloured to ink for chat actions (send, take over).
+ * Button derives its fill, gradient and ring from the brand colour inline.
+ */
+.btn-ink {
+  --color-kumo-brand: var(--color-kumo-contrast);
+}
+
+/*
+ * Softer lines than Kumo's default (10% ink), so cards, dividers and inputs
+ * separate without drawing hard edges. Unlayered, so it wins over the theme.
+ */
+:root {
+  --color-kumo-line: light-dark(oklch(0% 0 0 / 0.06), oklch(100% 0 0 / 0.08));
+
+  /* Translucent fills that read the same on the canvas and on white. */
+  --fill-hover: light-dark(oklch(0% 0 0 / 0.045), oklch(100% 0 0 / 0.07));
+  --fill-active: light-dark(oklch(0% 0 0 / 0.07), oklch(100% 0 0 / 0.11));
+}
+
+/*
+ * Layout grid. Every column (sidebar, chat, side panel) starts with a
+ * --header-h row whose --control-size controls sit --inset from each edge
+ * on all four sides, so the three top rows share one centre line. The
+ * composer row and the sidebar footer are both --footer-h tall and share
+ * the bottom centre line.
+ */
+:root {
+  --header-h: 56px;
+  --control-size: 36px;
+  --inset: 10px;
+  --footer-h: 80px;
+}
+
+@layer components {
+  .col-header {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 8px;
+    height: var(--header-h);
+    padding-inline: var(--inset);
+  }
+
+  /* The one icon button: round, quiet until hovered, tinted when pressed. */
+  .icon-btn {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: var(--control-size);
+    height: var(--control-size);
+    border-radius: 9999px;
+    color: var(--text-color-kumo-subtle);
+    outline: none;
+    transition:
+      background-color 150ms ease,
+      color 150ms ease,
+      transform 160ms ease-out;
+  }
+
+  .icon-btn:hover,
+  .icon-btn[aria-pressed="true"],
+  .icon-btn[aria-expanded="true"] {
+    background-color: var(--fill-hover);
+    color: var(--text-color-kumo-default);
+  }
+
+  .icon-btn[aria-pressed="true"] {
+    background-color: var(--fill-active);
+  }
+
+  .icon-btn:focus-visible {
+    box-shadow: 0 0 0 2px var(--color-kumo-focus);
+  }
+
+  .icon-btn:active {
+    transform: scale(0.96);
+  }
+
+  .icon-btn:disabled {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  /* A filled variant for the composer's + and other primary-ish actions. */
+  .icon-btn.is-filled {
+    background-color: var(--fill-hover);
+    color: var(--text-color-kumo-default);
+  }
+
+  .icon-btn.is-filled:hover {
+    background-color: var(--fill-active);
+  }
+}
+
+/*
+ * Motion tokens (transitions.dev scale). Components reference these instead
+ * of hardcoding durations and curves.
+ */
+:root {
+  --duration-stagger: 40ms;
+  --duration-micro: 80ms;
+  --duration-quick: 150ms;
+  --duration-fast: 250ms;
+  --duration-medium: 350ms;
+  --duration-slow: 400ms;
+  --duration-very-slow: 500ms;
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.36, 0.64, 1);
+  --blur-small: 2px;
+  --blur-medium: 3px;
+
+  /* Side panels and the bot sidebar */
+  --panel-open-dur: var(--duration-slow);
+  --panel-close-dur: var(--duration-medium);
+  --panel-ease: var(--ease-smooth-out);
+  --panel-travel: 24px;
+  --panel-blur: var(--blur-small);
+
+  /* Shimmer text (thinking / typing labels) */
+  --shimmer-dur: 2000ms;
+  --shimmer-highlight: var(--text-color-kumo-default);
+  --shimmer-band: 400%;
+
+  /* Icon swap (send ↔ stop) */
+  --icon-swap-dur: var(--duration-fast);
+  --icon-swap-start-scale: 0.25;
+
+  /* Tabs sliding (segmented control) */
+  --tabs-dur: var(--duration-fast);
+  --tabs-ease: var(--ease-smooth-out);
+  --tabs-text-muted: var(--text-color-kumo-subtle);
+  --tabs-text-active: var(--text-color-kumo-default);
+  --tabs-bar-bg: var(--color-kumo-tint);
+  --tabs-pill-bg: var(--color-kumo-base);
+
+  /* Accordion expand (activity rows) */
+  --acc-expand: var(--duration-fast);
+  --acc-collapse: var(--duration-fast);
+  --acc-chevron: var(--duration-fast);
+  --acc-ease: var(--ease-smooth-out);
+}
+
+/* Accordion: grid-template-rows 0fr → 1fr, no JS height measuring. */
+.t-acc-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--acc-collapse) var(--acc-ease);
+}
+.t-acc[data-open="true"] .t-acc-panel {
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--acc-expand) var(--acc-ease);
+}
+.t-acc-panel-inner {
+  overflow: hidden;
+  opacity: 0;
+  filter: blur(2px);
+  transition:
+    opacity var(--acc-collapse) var(--acc-ease),
+    filter var(--acc-collapse) var(--acc-ease);
+}
+.t-acc[data-open="true"] .t-acc-panel-inner {
+  opacity: 1;
+  filter: blur(0);
+  transition:
+    opacity var(--acc-expand) var(--acc-ease),
+    filter var(--acc-expand) var(--acc-ease);
+}
+.t-acc-chevron {
+  display: inline-flex;
+  transform: scaleY(1);
+  transform-origin: center;
+  transition: transform var(--acc-chevron) var(--acc-ease);
+}
+.t-acc-chevron path {
+  vector-effect: non-scaling-stroke;
+}
+.t-acc[data-open="true"] .t-acc-chevron {
+  transform: scaleY(-1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-acc-panel,
+  .t-acc-panel-inner,
+  .t-acc-chevron {
+    transition: none !important;
+  }
+}
+
+/*
+ * Split views (sidebar | main, thread | panel), built on
+ * react-resizable-panels. Opening and closing resize the panel; while that
+ * happens the group carries data-animating so flex-grow eases, and the
+ * content inside keeps its open width and slides, fades and un-blurs.
+ * Dragging the line resizes without animation. Closing is faster.
+ */
+.split-view[data-animating] > [data-panel] {
+  transition: flex-grow var(--panel-open-dur) var(--panel-ease);
+}
+
+.split-view[data-animating="close"] > [data-panel] {
+  transition-duration: var(--panel-close-dur);
+}
+
+.split-content {
+  width: var(--split-width);
+  height: 100%;
+  flex-shrink: 0;
+  opacity: 0;
+  filter: blur(var(--panel-blur));
+  transform: translateX(calc(var(--panel-travel) * var(--split-from)));
+  transition:
+    transform var(--panel-close-dur) var(--panel-ease),
+    opacity var(--panel-close-dur) var(--panel-ease),
+    filter var(--panel-close-dur) var(--panel-ease);
+}
+
+.split-content[data-side="left"] {
+  --split-from: -1;
+}
+
+.split-content[data-side="right"] {
+  --split-from: 1;
+}
+
+.split-content[data-open="true"] {
+  opacity: 1;
+  filter: blur(0);
+  transform: translateX(0);
+  transition-duration: var(--panel-open-dur);
+}
+
+/*
+ * The line between panels. Hovering shows a grip on the line at the
+ * pointer's height (--grip-y, set from script); it follows while dragging.
+ */
+.resize-handle {
+  position: relative;
+  z-index: 10;
+  width: 1px;
+  background: var(--color-kumo-line);
+  outline: none;
+}
+
+.resize-handle[data-separator="disabled"] {
+  background: transparent;
+}
+
+.resize-grip {
+  position: absolute;
+  top: var(--grip-y, 50%);
+  left: 50%;
+  width: 4px;
+  height: 28px;
+  border-radius: 999px;
+  background: light-dark(oklch(0% 0 0 / 0.28), oklch(100% 0 0 / 0.32));
+  box-shadow: 0 0 0 2px var(--color-kumo-base);
+  opacity: 0;
+  transform: translate(-50%, -50%) scaleY(0.6);
+  transition:
+    opacity 150ms ease,
+    transform 150ms var(--ease-smooth-out),
+    background-color 150ms ease;
+  pointer-events: none;
+}
+
+.resize-handle:is(
+    [data-separator="hover"],
+    [data-separator="active"],
+    [data-separator="focus"]
+  )
+  .resize-grip {
+  opacity: 1;
+  transform: translate(-50%, -50%);
+}
+
+.resize-handle[data-separator="active"] .resize-grip {
+  background: light-dark(oklch(0% 0 0 / 0.5), oklch(100% 0 0 / 0.55));
+}
+
+/*
+ * Composer island. One row (+, field, send) while empty; it opens into a
+ * card with attachment previews on top, the field across the full width and
+ * the buttons underneath. The same elements move between grid areas, so the
+ * field keeps focus. Height eases, anchored to the bottom so it grows up.
+ */
+.composer {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  overflow: hidden;
+  border-radius: 24px;
+  background: var(--color-kumo-base);
+  box-shadow:
+    0 0 0 1px var(--color-kumo-line),
+    0 1px 2px oklch(0 0 0 / 0.04),
+    0 4px 12px oklch(0 0 0 / 0.04);
+  transition:
+    height var(--duration-fast) var(--ease-smooth-out),
+    box-shadow var(--duration-quick) ease;
+}
+
+/* Focus: a slightly firmer edge and a softer lift, not a ring. */
+.composer:focus-within {
+  box-shadow:
+    0 0 0 1px light-dark(oklch(0 0 0 / 0.12), oklch(1 0 0 / 0.16)),
+    0 1px 2px oklch(0 0 0 / 0.04),
+    0 6px 20px oklch(0 0 0 / 0.07);
+}
+
+.composer[data-dragging] {
+  box-shadow:
+    0 0 0 1.5px light-dark(oklch(0 0 0 / 0.22), oklch(1 0 0 / 0.28)),
+    0 8px 24px oklch(0 0 0 / 0.08);
+}
+
+/* 36px buttons and a one-line field sit 6px inside a 48px pill. */
+.composer-grid {
+  display: grid;
+  flex-shrink: 0;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: "plus field send";
+  align-items: end;
+  column-gap: 8px;
+  padding: 6px;
+}
+
+.composer[data-expanded="true"] .composer-grid {
+  grid-template-areas:
+    "strip strip strip"
+    "field field field"
+    "plus . send";
+  row-gap: 6px;
+  padding: 8px;
+}
+
+.composer-plus {
+  grid-area: plus;
+}
+
+.composer-send {
+  grid-area: send;
+}
+
+.composer-field {
+  grid-area: field;
+  max-height: 200px;
+  resize: none;
+  background: transparent;
+  padding: 6px;
+  font-size: 15px;
+  line-height: 24px;
+  color: var(--text-color-kumo-default);
+  outline: none;
+}
+
+.composer-field::placeholder {
+  color: var(--text-color-kumo-placeholder);
+}
+
+.composer[data-expanded="true"] .composer-field {
+  padding: 4px 8px 0;
+}
+
+.composer-strip {
+  grid-area: strip;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* Room for the remove buttons' focus rings. */
+  margin: -4px;
+  padding: 4px;
+}
+
+/* Inner radius 16 = the island's 24 minus its 8px padding. */
+.composer-card {
+  position: relative;
+  flex-shrink: 0;
+  width: 120px;
+  height: 104px;
+  transition:
+    transform var(--duration-fast) var(--ease-bounce),
+    opacity var(--duration-quick) ease;
+
+  @starting-style {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+.composer-card-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--fill-hover);
+  padding: 12px;
+  text-align: left;
+  color: var(--text-color-kumo-default);
+  outline: none;
+  transition: transform 160ms ease-out;
+  padding-bottom: 8px;
+}
+
+.composer-card-body:active {
+  transform: scale(0.97);
+}
+
+.composer-card-body:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-kumo-focus);
+}
+
+/* Images fill the card on their own. */
+.composer-card-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.composer-card-body::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px oklch(0 0 0 / 0.06);
+  pointer-events: none;
+}
+
+.composer-card-label {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* An image keeps its photo while it uploads, dimmed under a spinner. */
+.composer-card[data-status="uploading"] .composer-card-img {
+  opacity: 0.55;
+}
+
+.composer-card-spinner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.composer-card-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--color-kumo-base) 85%, transparent);
+  color: var(--text-color-kumo-default);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.12);
+  outline: none;
+  transition:
+    transform 160ms ease-out,
+    background-color 150ms ease;
+}
+
+.composer-card-remove:hover {
+  background: var(--color-kumo-base);
+}
+
+/* With a pointer, remove appears on the card's hover or keyboard focus.
+   Touch screens can't hover, so they keep it visible. */
+@media (hover: hover) {
+  .composer-card-remove {
+    opacity: 0;
+    scale: 0.8;
+    transition:
+      opacity var(--duration-quick) ease,
+      scale var(--duration-quick) var(--ease-smooth-out),
+      transform 160ms ease-out,
+      background-color 150ms ease;
+  }
+
+  .composer-card:hover .composer-card-remove,
+  .composer-card:focus-within .composer-card-remove {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+.composer-card-remove:active {
+  transform: scale(0.9);
+}
+
+.composer-card-remove:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-kumo-focus);
+}
+
+/* Shimmer: a highlight band sweeps across muted text while work runs. */
+.t-shimmer {
+  position: relative;
+  display: inline-block;
+}
+
+.t-shimmer::before {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 40%,
+    var(--shimmer-highlight) 50%,
+    transparent 60%,
+    transparent 100%
+  );
+  background-size: var(--shimmer-band) 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: t-shimmer var(--shimmer-dur) linear infinite;
+}
+
+@keyframes t-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0% 0;
+  }
+}
+
+/* Icon swap: two icons share one slot and cross-fade with blur + scale. */
+.t-icon-swap {
+  display: inline-grid;
+}
+
+.t-icon-swap .t-icon {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--icon-swap-dur) ease-in-out,
+    filter var(--icon-swap-dur) ease-in-out,
+    transform var(--icon-swap-dur) ease-in-out;
+}
+
+.t-icon-swap[data-state="a"] .t-icon[data-icon="b"],
+.t-icon-swap[data-state="b"] .t-icon[data-icon="a"] {
+  opacity: 0;
+  filter: blur(var(--blur-small));
+  transform: scale(var(--icon-swap-start-scale));
+}
+
+/* Tabs sliding: the active pill tweens between measured tab positions. */
+.t-tabs {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 48px;
+  background: var(--tabs-bar-bg);
+}
+.t-tab {
+  position: relative;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  height: 30px;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tabs-text-muted);
+  cursor: pointer;
+  border-radius: 48px;
+  outline: none;
+  z-index: 1;
+  transition: color var(--tabs-dur) var(--tabs-ease);
+}
+.t-tab:not([aria-selected="true"]):hover,
+.t-tab[aria-selected="true"] {
+  color: var(--tabs-text-active);
+}
+.t-tab:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-kumo-focus);
+}
+
+.t-tabs-pill {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  height: 30px;
+  width: 0;
+  background: var(--tabs-pill-bg);
+  border-radius: 48px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+  transform: translateX(0);
+  transition:
+    transform var(--tabs-dur) var(--tabs-ease),
+    width var(--tabs-dur) var(--tabs-ease);
+  will-change: transform, width;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* New messages rise in; history already on screen does not replay. */
+.msg-enter {
+  transition:
+    opacity var(--duration-fast) var(--ease-smooth-out),
+    transform var(--duration-fast) var(--ease-smooth-out),
+    filter var(--duration-fast) var(--ease-smooth-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+    filter: blur(var(--blur-small));
+  }
+}
+
+.msg-enter[data-from="user"] {
+  transform-origin: bottom right;
+}
+
+.msg-enter[data-from="bot"] {
+  transform-origin: bottom left;
+}
+
+/* Unread dot pops in with a small overshoot. */
+.unread-dot {
+  transition:
+    transform var(--duration-very-slow) var(--ease-bounce),
+    opacity var(--duration-fast) ease-out;
+
+  @starting-style {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+}
+
+/* Staggered reveal for headline + supporting copy (onboarding). */
+.reveal > * {
+  transition:
+    opacity var(--duration-very-slow) var(--ease-smooth-out),
+    transform var(--duration-very-slow) var(--ease-smooth-out),
+    filter var(--duration-very-slow) var(--ease-smooth-out);
+  transition-delay: calc(var(--i, 0) * 60ms);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(12px);
+    filter: blur(var(--blur-medium));
+  }
+}
+
+/* Anything pressable scales down a touch so it feels like it heard you. */
+.pressable {
+  transition:
+    transform 160ms ease-out,
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.pressable:active {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .split-view > [data-panel],
+  .split-content,
+  .resize-grip,
+  .composer,
+  .composer-card,
+  .t-icon-swap .t-icon,
+  .t-tabs-pill,
+  .t-tab,
+  .msg-enter,
+  .unread-dot,
+  .reveal > * {
+    transition: none !important;
+  }
+
+  .split-content {
+    transform: none !important;
+    filter: none !important;
+  }
+
+  .t-shimmer::before {
+    animation: none !important;
+  }
+
+  .pressable:active,
+  .icon-btn:active {
+    transform: none;
   }
 }
