@@ -17,7 +17,7 @@ import {
   PlusIcon,
 } from "@/components/icons"
 import { BotAvatar } from "@/components/bot-avatar"
-import { ShimmerText } from "@/components/thread"
+import { ShimmerText } from "@/components/shimmer-text"
 import { useHub } from "@/lib/hub-context"
 import { usePushNotifications } from "@/lib/push"
 import type { BotSummary } from "@/lib/types"
@@ -68,10 +68,16 @@ function NotificationsButton() {
         )}
       />
       <DropdownMenu.Content side="top" align="end">
-        <DropdownMenu.Item icon={<BellRingingIcon />} onClick={() => void test()}>
+        <DropdownMenu.Item
+          icon={<BellRingingIcon />}
+          onClick={() => void test()}
+        >
           Send a test notification
         </DropdownMenu.Item>
-        <DropdownMenu.Item icon={<BellSlashIcon />} onClick={() => void disable()}>
+        <DropdownMenu.Item
+          icon={<BellSlashIcon />}
+          onClick={() => void disable()}
+        >
           Turn off on this device
         </DropdownMenu.Item>
       </DropdownMenu.Content>

@@ -11,9 +11,14 @@ import {
   BookOpen01Icon as BookOpen,
   Cancel01Icon as Cancel,
   Clock01Icon as Clock,
+  ComputerTerminal01Icon as Terminal,
   Copy01Icon as Copy,
   AiBrowserIcon as AiBrowser,
   Delete02Icon as Delete,
+  Brain02Icon as Brain,
+  Calendar03Icon as Calendar,
+  FileEditIcon as FileEdit,
+  Message01Icon as Message,
   Download04Icon as Download,
   AlignBoxTopLeftIcon as File,
   FileZipIcon as FileZip,
@@ -77,6 +82,8 @@ export const ArrowsClockwiseIcon = icon(Repeat, "ArrowsClockwiseIcon")
 export const BellIcon = icon(Notification, "BellIcon")
 export const BellRingingIcon = icon(NotificationRinging, "BellRingingIcon")
 export const BellSlashIcon = icon(NotificationOff, "BellSlashIcon")
+export const BrainIcon = icon(Brain, "BrainIcon")
+export const CalendarIcon = icon(Calendar, "CalendarIcon")
 export const BookOpenTextIcon = icon(BookOpen, "BookOpenTextIcon")
 export const CaretDownIcon = icon(ChevronDown, "CaretDownIcon")
 export const CaretRightIcon = icon(ChevronRight, "CaretRightIcon")
@@ -85,6 +92,7 @@ export const CheckIcon = icon(Tick, "CheckIcon")
 export const ClockIcon = icon(Clock, "ClockIcon")
 export const CopyIcon = icon(Copy, "CopyIcon")
 export const DownloadIcon = icon(Download, "DownloadIcon")
+export const FileEditIcon = icon(FileEdit, "FileEditIcon")
 export const FileIcon = icon(File, "FileIcon")
 export const FilePdfIcon = icon(Pdf, "FilePdfIcon")
 export const FileZipIcon = icon(FileZip, "FileZipIcon")
@@ -95,6 +103,7 @@ export const GearSixIcon = icon(Settings, "GearSixIcon")
 export const GlobeIcon = icon(Globe, "GlobeIcon")
 export const ImageIcon = icon(Image, "ImageIcon")
 export const ListBulletsIcon = icon(ListBullet, "ListBulletsIcon")
+export const MessageIcon = icon(Message, "MessageIcon")
 export const MagnifyingGlassIcon = icon(Search, "MagnifyingGlassIcon")
 export const ComputerIcon = icon(AiBrowser, "ComputerIcon")
 export const PaperclipIcon = icon(Attachment, "PaperclipIcon")
@@ -103,6 +112,7 @@ export const PlusIcon = icon(Add, "PlusIcon")
 export const PowerIcon = icon(Power, "PowerIcon")
 export const SidebarSimpleIcon = icon(SidebarLeft, "SidebarSimpleIcon")
 export const StopIcon = icon(Stop, "StopIcon")
+export const TerminalIcon = icon(Terminal, "TerminalIcon")
 export const TrashIcon = icon(Delete, "TrashIcon")
 export const WarningIcon = icon(Alert, "WarningIcon")
 export const WebhooksLogoIcon = icon(Webhook, "WebhooksLogoIcon")

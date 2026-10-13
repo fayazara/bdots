@@ -399,6 +399,9 @@ export class BotAgent extends Think<Env, BotState> {
         workspace: { binding: "BotAgent", id: this.ctx.id.toString() },
         ctx: this.ctx,
         commands: [curl, jq],
+        // Without this the shell has no network at all and `curl` fails,
+        // which pushes the bot onto the browser for plain HTTP work.
+        egress: { mode: "direct" },
       }),
     ],
     useThink: true,
@@ -642,7 +645,22 @@ export class BotAgent extends Think<Env, BotState> {
   // ── Model and prompt ────────────────────────────────────────────────
 
   override getModel() {
-    const model = this.env.MODEL
+    return this.resolveModelId(this.env.MODEL)
+  }
+
+  /**
+   * Background turns (routines, check-ins, email) use BACKGROUND_MODEL when
+   * it is set, so a strong interactive model does not run up the bill on
+   * every scheduled check.
+   */
+  private turnModel() {
+    const background = this.env.BACKGROUND_MODEL?.trim()
+    return background && this.isBackgroundTurn()
+      ? this.resolveModelId(background)
+      : this.getModel()
+  }
+
+  private resolveModelId(model: string) {
     // Workers AI ids go through the binding directly unless an AI Gateway is
     // configured; "<provider>/<model>" slugs are always routed via AI Gateway.
     if (model.startsWith("@cf/") && this.env.AI_GATEWAY_ID) {
@@ -724,6 +742,7 @@ export class BotAgent extends Think<Env, BotState> {
       })),
     })
     return {
+      model: this.turnModel(),
       instructions: `${system}\n\n${context}`,
       tools: this.#appTools,
     }
@@ -828,7 +847,7 @@ export class BotAgent extends Think<Env, BotState> {
           backends: {
             shell: {
               description:
-                "just-bash in a Dynamic Worker. Starts instantly. Has cat, ls, grep, sed, awk, jq, sort, head, tail, find, curl and git. Cannot run npm, node, python or other binaries.",
+                "just-bash in a Dynamic Worker. Starts instantly and has internet access. Has cat, ls, grep, sed, awk, jq, sort, head, tail, find, curl and git. Use curl for public APIs and plain HTTP. Cannot run npm, node, python or other binaries.",
             },
           },
         },
@@ -2535,13 +2554,18 @@ export class BotAgent extends Think<Env, BotState> {
   /** Live View URLs for the bot's browser tabs. Valid for about 5 minutes. */
   @callable()
   async getLiveView(): Promise<
-    { url: string; pageUrl?: string; title?: string }[]
+    { targetId: string; url: string; pageUrl?: string; title?: string }[]
   > {
     const view = await this.browser.connector.liveView({ mode: "tab" })
     if (!view) return []
     return view.targets
       .filter((t) => t.type === undefined || t.type === "page")
-      .map((t) => ({ url: t.url, pageUrl: t.pageUrl, title: t.title }))
+      .map((t) => ({
+        targetId: t.targetId,
+        url: t.url,
+        pageUrl: t.pageUrl,
+        title: t.title,
+      }))
   }
 
   @callable()

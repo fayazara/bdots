@@ -61,7 +61,15 @@ export default defineConfig({
       }),
       // Main chat model. A "@cf/..." id hits Workers AI; a
       // "<provider>/<model>" slug is routed through AI Gateway.
+      // Agentic browser work needs a strong model: a small one tends to loop
+      // on a failing approach instead of switching or asking. For example
+      // "anthropic/claude-sonnet-5-5" or "openai/<model>" (AI Gateway with
+      // Unified Billing or stored provider keys).
       MODEL: bindings.text("@cf/deepseek-ai/deepseek-v4-flash-0731"),
+      // Optional model for background turns (routines, check-ins, email).
+      // Empty uses MODEL. Lets a cheap model run scheduled work while chat
+      // uses a strong one.
+      BACKGROUND_MODEL: bindings.text(""),
       // Optional AI Gateway id. When set, Workers AI calls go through it
       // too (logs, caching, spend limits).
       AI_GATEWAY_ID: bindings.text(""),

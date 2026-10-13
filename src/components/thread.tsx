@@ -3,21 +3,19 @@ import { useHydrated } from "@tanstack/react-router"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { Button } from "@cloudflare/kumo/components/button"
-import { Loader } from "@cloudflare/kumo/components/loader"
 import {
   AppWindowIcon,
-  CaretRightIcon,
-  CheckIcon,
   ClockIcon,
   CrawlIcon,
   EnvelopeSimpleIcon,
-  WarningIcon,
   WebhooksLogoIcon,
 } from "@/components/icons"
 import { BotAvatar } from "@/components/bot-avatar"
 import { CaptureCard } from "@/components/capture-card"
 import { CodeBlock } from "@/components/code-block"
 import { ComputerCard } from "@/components/computer-card"
+import { ShimmerText } from "@/components/shimmer-text"
+import { WorkGroup } from "@/components/work-group"
 import { RoutineSummary } from "@/components/routine-summary"
 import {
   describeCall,
@@ -33,7 +31,7 @@ import { NO_UPDATE } from "@/lib/types"
 import type { UIMessage } from "ai"
 import type { ReadFileData } from "@/components/capture-card"
 import type { GetLiveView } from "@/components/computer-card"
-import type { Block, ToolCall, WorkItem } from "@/lib/message-parts"
+import type { Block, ToolCall } from "@/lib/message-parts"
 import type { BotState } from "@/lib/types"
 
 export type OnApproval = (
@@ -161,144 +159,8 @@ function Prose({ text }: { text: string }) {
   )
 }
 
-/** Muted text with a highlight sweeping across it while work is running. */
-export function ShimmerText({
-  text,
-  className = "",
-}: {
-  text: string
-  className?: string
-}) {
-  return (
-    <span
-      className={`t-shimmer text-kumo-subtle ${className}`}
-      data-text={text}
-    >
-      {text}
-    </span>
-  )
-}
-
 function SystemEvent({ children }: { children: React.ReactNode }) {
   return <p className="py-1 text-center text-sm text-kumo-subtle">{children}</p>
-}
-
-function StepIcon({ state }: { state: ToolCall["state"] }) {
-  if (state === "running") return <Loader size="sm" />
-  if (state === "done") return <CheckIcon size={14} />
-  return <WarningIcon size={14} className="text-kumo-warning" />
-}
-
-function formatDuration(ms: number) {
-  const s = Math.max(1, Math.round(ms / 1000))
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  return s % 60 ? `${m}m ${s % 60}s` : `${m}m`
-}
-
-/** Seconds since `from`, ticking while `on`. */
-function useElapsed(from: number | undefined, on: boolean) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!on) return
-    setNow(Date.now())
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [on])
-  return from ? now - from : undefined
-}
-
-/**
- * Everything the bot did on the way to its reply, folded into one line:
- * "Working for 12s" with the current step while it runs, then "Worked for
- * 37s" that opens into the steps and notes.
- */
-function WorkGroup({
-  work,
-  live,
-  startedAt,
-  durationMs,
-}: {
-  work: WorkItem[]
-  live: boolean
-  startedAt?: number
-  durationMs?: number
-}) {
-  const [open, setOpen] = useState(false)
-  const hydrated = useHydrated()
-  const elapsed = useElapsed(startedAt, live && hydrated)
-  const steps = work.filter((w) => w.kind === "step")
-  const current =
-    steps.findLast((s) => s.call.state === "running") ?? steps.at(-1)
-  const failed = steps.filter(
-    (s) => s.call.state === "error" || s.call.state === "denied"
-  ).length
-
-  const label = live
-    ? elapsed !== undefined && elapsed >= 1000
-      ? `Working for ${formatDuration(elapsed)}`
-      : "Working"
-    : durationMs
-      ? `Worked for ${formatDuration(durationMs)}`
-      : `${steps.length} ${steps.length === 1 ? "step" : "steps"}`
-
-  return (
-    <div className="w-full max-w-[640px] text-sm text-kumo-subtle">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="group flex max-w-full items-center gap-1 rounded-lg py-0.5 pl-1 outline-none hover:text-kumo-default focus-visible:ring-2 focus-visible:ring-kumo-focus"
-      >
-        {live ? <ShimmerText text={label} /> : <span>{label}</span>}
-        {!live && failed ? (
-          <span className="text-kumo-warning"> · {failed} failed</span>
-        ) : null}
-        <CaretRightIcon
-          size={14}
-          className={`shrink-0 transition-transform duration-150 ${open ? "rotate-90" : ""}`}
-        />
-      </button>
-
-      {live && !open && current ? (
-        <div className="mt-1.5 flex items-center gap-2 pl-1">
-          <StepIcon state={current.call.state} />
-          <span className="truncate">{describeCall(current.call)}</span>
-        </div>
-      ) : null}
-
-      {open ? (
-        <ol className="mt-2 ml-[11px] space-y-2.5 border-l border-kumo-line pb-1 pl-4">
-          {work.map((item) =>
-            item.kind === "step" ? (
-              <li key={item.key} className="flex items-start gap-2">
-                <span className="mt-[3px] shrink-0">
-                  <StepIcon state={item.call.state} />
-                </span>
-                <span className="min-w-0">
-                  <span className="block truncate">
-                    {describeCall(item.call)}
-                  </span>
-                  {item.call.errorText ? (
-                    <span className="mt-0.5 line-clamp-2 block text-xs text-kumo-warning">
-                      {item.call.errorText}
-                    </span>
-                  ) : null}
-                </span>
-              </li>
-            ) : (
-              <li
-                key={item.key}
-                className="text-[13px] leading-5 whitespace-pre-wrap text-kumo-subtle"
-              >
-                {item.text.trim()}
-              </li>
-            )
-          )}
-        </ol>
-      ) : null}
-    </div>
-  )
 }
 
 function ApprovalCard({
@@ -377,6 +239,11 @@ function AssistantMessage({
           live={live}
           startedAt={startedAt}
           durationMs={durationMs}
+          renderNote={(text) => (
+            <div className="[&_.bubble-prose_p]:my-1.5">
+              <Prose text={text} />
+            </div>
+          )}
         />
       ) : null}
       {shown.map((block) => {

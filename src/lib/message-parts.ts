@@ -212,7 +212,9 @@ export function toBlocks(message: UIMessage): Block[] {
 
     const last = blocks.at(-1)
     if (COMPUTER_TOOLS.has(call.name)) {
-      if (last?.kind === "computer") last.calls.push(call)
+      // One browser, one card: narration between calls must not split it.
+      const card = blocks.find((b) => b.kind === "computer")
+      if (card) card.calls.push(call)
       else blocks.push({ kind: "computer", key, calls: [call] })
       return
     }
@@ -282,7 +284,7 @@ export function describeCall(call: ToolCall): string {
     case "delete":
       return `Deleted ${str("path")}`
     case "exec":
-      return `Ran ${str("command")}`
+      return `Ran ${str("command").replace(/\s+/g, " ").trim()}`
     case "browser_markdown":
       return `Read ${str("url")}`
     case "browser_extract":
@@ -329,5 +331,101 @@ export function describeCall(call: ToolCall): string {
       return `Removed from ${str("slug")}/${str("collection")}`
     default:
       return mcpLabel(call.name)
+  }
+}
+
+/** What a step touched, for its icon and for grouping runs of steps. */
+export type StepKind =
+  | "shell"
+  | "files"
+  | "search"
+  | "web"
+  | "memory"
+  | "routine"
+  | "bot"
+  | "app"
+  | "other"
+
+export function stepKind(call: ToolCall): StepKind {
+  switch (call.name) {
+    case "exec":
+      return "shell"
+    case "read":
+    case "ls":
+    case "write":
+    case "edit":
+    case "delete":
+      return "files"
+    case "find":
+    case "grep":
+      return "search"
+    case "search_context":
+      return "memory"
+    case "schedule_routine":
+    case "update_routine":
+    case "list_routines":
+    case "cancel_routine":
+      return "routine"
+    case "message_bot":
+      return "bot"
+    case "save_app":
+    case "list_apps":
+    case "delete_app":
+    case "app_data_list":
+    case "app_data_put":
+    case "app_data_delete":
+      return "app"
+  }
+  if (call.name.startsWith("browser_")) return "web"
+  if (call.name.startsWith("tool_")) return "app"
+  return "other"
+}
+
+const FILE_WRITES = new Set(["write", "edit", "delete"])
+
+/** Header for a run of same-kind steps, e.g. "Ran 4 commands". */
+export function describeGroup(kind: StepKind, calls: ToolCall[]): string {
+  const n = calls.length
+  switch (kind) {
+    case "shell":
+      return `Ran ${n} commands`
+    case "files":
+      return calls.some((c) => FILE_WRITES.has(c.name))
+        ? `Changed ${n} files`
+        : `Read ${n} files`
+    case "search":
+      return `Searched ${n} times`
+    case "web":
+      return `Visited ${n} pages`
+    default:
+      return `${n} steps`
+  }
+}
+
+/** Shell output in the shape @cloudflare/computer's exec tool returns. */
+export interface ShellResult {
+  command: string
+  output: string
+  exitCode: number | null
+  error?: string
+}
+
+export function shellResult(call: ToolCall): ShellResult | null {
+  if (call.name !== "exec") return null
+  const out = (call.output ?? {}) as {
+    stdout?: unknown
+    stderr?: unknown
+    exitCode?: unknown
+    error?: unknown
+  }
+  const text = (v: unknown) => (typeof v === "string" ? v : "")
+  return {
+    command: text(call.input.command),
+    output: [text(out.stdout), text(out.stderr)]
+      .filter((t) => t.trim())
+      .join("\n")
+      .replace(/\s+$/, ""),
+    exitCode: typeof out.exitCode === "number" ? out.exitCode : null,
+    error: text(out.error) || call.errorText,
   }
 }

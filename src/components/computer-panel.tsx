@@ -72,7 +72,7 @@ function BrowserPane({ agent }: { agent: BotConnection }) {
               size="sm"
               variant="ghost"
               icon={<ArrowClockwiseIcon />}
-              onClick={() => void refresh()}
+              onClick={() => void refresh(true)}
             >
               Check again
             </Button>
@@ -104,7 +104,7 @@ function BrowserPane({ agent }: { agent: BotConnection }) {
         <button
           type="button"
           aria-label="Refresh live view"
-          onClick={() => void refresh()}
+          onClick={() => void refresh(true)}
           className="icon-btn size-8!"
         >
           <ArrowClockwiseIcon size={16} />
