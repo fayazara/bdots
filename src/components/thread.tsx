@@ -3,6 +3,7 @@ import { useHydrated } from "@tanstack/react-router"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { Button } from "@cloudflare/kumo/components/button"
+import { Loader } from "@cloudflare/kumo/components/loader"
 import {
   AppWindowIcon,
   ClockIcon,
@@ -718,7 +719,9 @@ export function Thread({
             role="status"
             aria-live="polite"
           >
-            <BotAvatar avatar={bot.avatar} size={32} status="thinking" />
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-[10px] bg-(--fill-hover) text-kumo-default">
+              <Loader size="sm" />
+            </span>
             <ShimmerText
               text={bot.status === "working" ? "Working" : "Thinking"}
               className="text-[15px]"
