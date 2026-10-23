@@ -95,7 +95,9 @@ function Favicon({ host }: { host: string }) {
 }
 
 const PROSE = [
-  "bubble-prose text-[15px] leading-[1.65] text-pretty",
+  // Long URLs and query strings have no break points; let them wrap
+  // instead of running out of the bubble.
+  "bubble-prose text-[15px] leading-[1.65] text-pretty break-words",
   "[&_p]:my-3 [&_ul]:my-3 [&_ol]:my-3",
   "[&_strong]:font-semibold",
   "[&_h1]:mt-5 [&_h1]:mb-2 [&_h1]:text-[17px] [&_h1]:font-semibold",
@@ -495,7 +497,7 @@ function UserMessage({ message }: { message: UIMessage }) {
             {origin.name}
           </span>
         </SystemEvent>
-        <div className="w-fit max-w-[85%] rounded-[20px] border border-kumo-line px-4 py-2.5 text-kumo-default">
+        <div className="w-fit max-w-[85%] rounded-[20px] border border-kumo-line px-4 py-2.5 break-words text-kumo-default">
           <Prose text={stripOriginHeader(text)} />
         </div>
       </>

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react"
 import { Link, useHydrated, useNavigate } from "@tanstack/react-router"
 import { Button } from "@cloudflare/kumo/components/button"
-import { Dialog } from "@cloudflare/kumo/components/dialog"
+import { Input } from "@cloudflare/kumo/components/input"
+import { LayerDialog } from "@cloudflare/kumo/components/layer-dialog"
 import { Loader } from "@cloudflare/kumo/components/loader"
 import { Select } from "@cloudflare/kumo/components/select"
 import { Switch } from "@cloudflare/kumo/components/switch"
@@ -20,6 +21,7 @@ import {
   ArrowsClockwiseIcon,
   BookOpenTextIcon,
   CaretRightIcon,
+  CheckIcon,
   EnvelopeSimpleIcon,
   EyeIcon,
   PlugsConnectedIcon,
@@ -780,6 +782,24 @@ function DangerZone() {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [confirmation, setConfirmation] = useState("")
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = setTimeout(() => setCopied(false), 1500)
+    return () => clearTimeout(timer)
+  }, [copied])
+
+  function changeOpen(next: boolean) {
+    setOpen(next)
+    if (!next) setConfirmation("")
+  }
+
+  async function copyName() {
+    await navigator.clipboard.writeText(state.name)
+    setCopied(true)
+  }
 
   async function remove() {
     setDeleting(true)
@@ -792,8 +812,12 @@ function DangerZone() {
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={setOpen}>
-      <Dialog.Trigger
+    <LayerDialog.Alert
+      open={open}
+      onOpenChange={changeOpen}
+      dismissDisabled={deleting}
+    >
+      <LayerDialog.Trigger
         render={(props) => (
           <button
             {...props}
@@ -806,33 +830,60 @@ function DangerZone() {
           </button>
         )}
       />
-      <Dialog size="sm" className="space-y-4 p-6">
-        <Dialog.Title className="text-lg font-semibold text-balance">
-          Delete {state.name}?
-        </Dialog.Title>
-        <Dialog.Description className="text-sm text-pretty text-kumo-subtle">
-          Its chat history, memory, routines and every file on its computer are
-          deleted. This can't be undone.
-        </Dialog.Description>
-        <div className="flex justify-end gap-2">
-          <Dialog.Close
-            render={(props) => (
-              <Button {...props} variant="secondary" className="rounded-full">
-                Cancel
-              </Button>
-            )}
-          />
-          <Button
+      <LayerDialog.Content size="sm">
+        <LayerDialog.Title>Delete bot</LayerDialog.Title>
+        <LayerDialog.Description>
+          Deleting{" "}
+          <strong className="font-medium text-kumo-default">
+            {state.name}
+          </strong>{" "}
+          is permanent.
+        </LayerDialog.Description>
+        <LayerDialog.Body>
+          <div className="flex flex-col gap-5">
+            <p className="text-sm text-pretty text-kumo-subtle">
+              This deletes its chat history, memory, rules, routines and every
+              file on its computer. App connections and other bots stay in your
+              account.
+            </p>
+            <Input
+              label={
+                <>
+                  Type{" "}
+                  <button
+                    type="button"
+                    onClick={() => void copyName()}
+                    title={copied ? "Copied" : "Click to copy"}
+                    className="inline-flex cursor-copy items-center gap-1 rounded font-medium text-kumo-default outline-none hover:underline focus-visible:ring-2 focus-visible:ring-kumo-focus"
+                  >
+                    {state.name}
+                    {copied && (
+                      <CheckIcon size={12} className="text-kumo-success" />
+                    )}
+                  </button>{" "}
+                  to confirm.
+                </>
+              }
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={state.name}
+              value={confirmation}
+              onChange={(event) => setConfirmation(event.target.value)}
+            />
+          </div>
+        </LayerDialog.Body>
+        <LayerDialog.Actions dismissLabel="Cancel">
+          <LayerDialog.Actions.Primary
             variant="destructive"
-            className="rounded-full"
             loading={deleting}
+            disabled={confirmation !== state.name}
             onClick={() => void remove()}
           >
             Delete
-          </Button>
-        </div>
-      </Dialog>
-    </Dialog.Root>
+          </LayerDialog.Actions.Primary>
+        </LayerDialog.Actions>
+      </LayerDialog.Content>
+    </LayerDialog.Alert>
   )
 }
 
