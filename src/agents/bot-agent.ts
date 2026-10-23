@@ -47,6 +47,7 @@ import type {
   AppLink,
   ActivityEntry,
   BotAppDetail,
+  BotAttachment,
   BotAvatarKind,
   BotInbound,
   BotState,
@@ -164,6 +165,9 @@ const EXEC_WAIT_MS = 60_000
 const WATCH_SAMPLE_CHARS = 3_000
 /** Past this many app tools, the bot searches for tools instead of seeing all. */
 const LAZY_APP_TOOLS = 20
+/** Files one message_bot call can carry, and their combined size. */
+const MAX_BOT_FILES = 10
+const MAX_BOT_FILE_BYTES = 5 * 1024 * 1024
 /** A chain of bot-to-bot messages stops after this many bots. */
 const MAX_BOT_HOPS = 6
 /** Tools that only read: rerunning one after an interruption is harmless. */
@@ -1423,8 +1427,15 @@ export class BotAgent extends Think<Env, BotState> {
         inputSchema: z.object({
           to: z.string().describe("The other bot's name"),
           message: z.string(),
+          files: z
+            .array(z.string())
+            .max(MAX_BOT_FILES)
+            .optional()
+            .describe(
+              "Your own files to send along (paths under /workspace). Each bot has its own computer, so the other bot cannot open your paths: attach the file instead. They are copied into its inbox."
+            ),
         }),
-        execute: async ({ to, message }, { toolCallId }) => {
+        execute: async ({ to, message, files = [] }, { toolCallId }) => {
           const hops =
             (metaOf(this.messages.findLast((m) => m.role === "user")).hops ??
               0) + 1
@@ -1434,12 +1445,17 @@ export class BotAgent extends Think<Env, BotState> {
               error: `This conversation has already passed through ${MAX_BOT_HOPS} bots. Do not forward it again: finish the work yourself or tell the user.`,
             }
           }
+          const attachments = await this.readAttachments(files)
+          if ("error" in attachments) {
+            return { delivered: false, error: attachments.error }
+          }
           const hub = await this.hub()
           // Keyed on the tool call, so a recovered turn that re-runs this call
           // does not deliver the message twice.
           return hub.relayMessage(this.botId, to, message, {
             key: `bot:${this.botId}:${toolCallId}`,
             hops,
+            ...(attachments.files.length ? { files: attachments.files } : {}),
           })
         },
       }),
@@ -3002,13 +3018,89 @@ export class BotAgent extends Think<Env, BotState> {
   async receiveBotMessage(
     origin: MessageOrigin,
     text: string,
-    delivery: { key?: string; hops?: number } = {}
-  ) {
+    delivery: { key?: string; hops?: number; files?: BotAttachment[] } = {}
+  ): Promise<string[]> {
+    const saved = await this.saveAttachments(origin.name, delivery)
+    const listed = saved.length
+      ? `\n\nAttached files, copied into your workspace:\n${saved.map((p) => `- ${p}`).join("\n")}`
+      : ""
     await this.submitAs(
       origin,
-      `[Message from the ${origin.name} bot]\n${text}`,
+      `[Message from the ${origin.name} bot]\n${text}${listed}`,
       { key: delivery.key, hops: delivery.hops }
     )
+    return saved
+  }
+
+  /**
+   * Read the sender's files for message_bot. All or nothing: a missing or
+   * oversized file fails the send rather than delivering half of it.
+   */
+  private async readAttachments(
+    paths: string[]
+  ): Promise<{ files: BotAttachment[] } | { error: string }> {
+    const files: BotAttachment[] = []
+    let total = 0
+    for (const raw of paths) {
+      const path = raw.startsWith("/") ? raw : `${WORKSPACE_ROOT}/${raw}`
+      if (
+        !path.startsWith(`${WORKSPACE_ROOT}/`) ||
+        path.split("/").includes("..")
+      ) {
+        return { error: `${raw} is not a file in your /workspace.` }
+      }
+      const stat = await this.workspace.fs.stat(path).catch(() => null)
+      if (!stat?.isFile)
+        return { error: `${raw} does not exist or is a folder.` }
+      total += stat.size
+      if (total > MAX_BOT_FILE_BYTES) {
+        return {
+          error: `Attachments are limited to ${MAX_BOT_FILE_BYTES / 1024 / 1024} MB in total. Send fewer or smaller files.`,
+        }
+      }
+      const stream = await this.workspace.fs.readFile(path)
+      const bytes = new Uint8Array(await new Response(stream).arrayBuffer())
+      files.push({ name: path.slice(path.lastIndexOf("/") + 1), bytes })
+    }
+    return { files }
+  }
+
+  /** Save another bot's attachments under /workspace/inbox/bots/<sender>/. */
+  private async saveAttachments(
+    sender: string,
+    delivery: { key?: string; files?: BotAttachment[] }
+  ): Promise<string[]> {
+    if (!delivery.files?.length) return []
+    // Derived from the delivery key, so a re-delivered message rewrites the
+    // same files instead of making copies.
+    const digest = await crypto.subtle.digest(
+      "SHA-1",
+      new TextEncoder().encode(delivery.key ?? crypto.randomUUID())
+    )
+    const id = [...new Uint8Array(digest)]
+      .slice(0, 4)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+    const folder = `inbox/bots/${slugify(sender, 40)}/${new Date().toISOString().slice(0, 10)}-${id}`
+    const used = new Set<string>()
+    const saved: string[] = []
+    for (const file of delivery.files) {
+      const dot = file.name.lastIndexOf(".")
+      const stem = slugify(dot > 0 ? file.name.slice(0, dot) : file.name, 60)
+      const ext =
+        dot > 0
+          ? file.name
+              .slice(dot + 1)
+              .replace(/[^a-zA-Z0-9]/g, "")
+              .slice(0, 10)
+          : ""
+      let name = ext ? `${stem}.${ext}` : stem
+      for (let n = 2; used.has(name); n++)
+        name = ext ? `${stem}-${n}.${ext}` : `${stem}-${n}`
+      used.add(name)
+      saved.push(await this.saveFile(`${folder}/${name}`, file.bytes))
+    }
+    return saved
   }
 
   /** Schedule callback. */

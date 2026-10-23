@@ -5,6 +5,7 @@ import { BOT_AVATARS, NEW_BOT_NAME, botInstanceName } from "@/lib/types"
 import type {
   AppCatalog,
   AppTool,
+  BotAttachment,
   BotSummary,
   Connection,
   HubState,
@@ -586,8 +587,13 @@ export class UserHub extends Agent<Env, HubState> {
     fromBotId: string,
     to: string,
     text: string,
-    delivery: { key?: string; hops?: number } = {}
-  ): Promise<{ delivered: boolean; to?: string; error?: string }> {
+    delivery: { key?: string; hops?: number; files?: BotAttachment[] } = {}
+  ): Promise<{
+    delivered: boolean
+    to?: string
+    error?: string
+    files?: string[]
+  }> {
     const from = this.state.bots.find((b) => b.id === fromBotId)
     const needle = to.trim().toLowerCase()
     const target = this.state.bots.find(
@@ -607,12 +613,16 @@ export class UserHub extends Agent<Env, HubState> {
       return { delivered: false, error: "A bot cannot message itself" }
     }
     const bot = await this.bot(target.id)
-    await bot.receiveBotMessage(
+    const saved = await bot.receiveBotMessage(
       { kind: "bot", name: from.name, avatar: from.avatar },
       text,
       delivery
     )
-    return { delivered: true, to: target.name }
+    return {
+      delivered: true,
+      to: target.name,
+      ...(saved.length ? { files: saved } : {}),
+    }
   }
 }
 

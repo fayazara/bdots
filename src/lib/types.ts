@@ -347,3 +347,9 @@ export interface SecretMeta {
   purpose: string
   createdAt: number
 }
+
+/** A file one bot sends another with message_bot. */
+export interface BotAttachment {
+  name: string
+  bytes: Uint8Array
+}
