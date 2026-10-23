@@ -1,17 +1,18 @@
 import { Workspace, WorkspaceServiceProxy } from "@cloudflare/computer"
 import type {
   DurableObjectStorageLike,
-  ThinkWorkspaceCompatibility,
   WorkspaceStub,
 } from "@cloudflare/computer"
 import { WorkerShellBackend } from "@cloudflare/computer/backends/worker-shell"
 import curl from "@cloudflare/computer/shell/curl"
 import jq from "@cloudflare/computer/shell/jq"
-import { createAITools } from "@cloudflare/computer/tools"
+import { createAITools } from "@cloudflare/computer/tools/ai-sdk"
 import { Think } from "@cloudflare/think"
 import type {
   ChatResponseResult,
   ThinkIntervalSchedule,
+  PrepareStepContext,
+  StepConfig,
   ThinkScheduledTasks,
   ToolCallContext,
   ToolCallDecision,
@@ -27,10 +28,11 @@ import { CHAT_MESSAGE_TYPES } from "agents/chat"
 import type { ContextConfig } from "agents/context"
 import { isAutoReplyEmail } from "agents/email"
 import type { AgentEmail } from "agents/email"
+import { createAI } from "agents/models/ai-sdk"
+import type { AI, CloudflareLanguageModelId } from "agents/models/ai-sdk"
 import { jsonSchema, tool } from "ai"
 import type { JSONSchema7, ToolSet, UIMessage } from "ai"
 import PostalMime from "postal-mime"
-import { createWorkersAI } from "workers-ai-provider"
 import { z } from "zod"
 import {
   DEFAULT_PROACTIVE,
@@ -45,6 +47,7 @@ import type {
   AppLink,
   ActivityEntry,
   BotAppDetail,
+  BotAttachment,
   BotAvatarKind,
   BotInbound,
   BotState,
@@ -54,6 +57,8 @@ import type {
   OpenItem,
   ProactiveSettings,
   Routine,
+  RoutineRun,
+  RoutineWatch,
   RulePolicy,
   Skill,
 } from "@/lib/types"
@@ -87,6 +92,17 @@ import type { ReportedEntry } from "./prompt"
 import { finishTeachingCode, startTeachingCode } from "./teach"
 import type { TeachRecording, TeachSession } from "./teach"
 import type { UserHub } from "./user-hub"
+import { LoopGuard, shapeToolResults } from "./guards"
+import { MAX_MEMORY_CHARS, appendFact } from "./memory"
+import {
+  MAX_SECRET_RESPONSE_CHARS,
+  SECRET_REQUEST_TIMEOUT_MS,
+  authHeader,
+  httpsOrigin,
+  redact,
+  validSecretName,
+} from "./secrets"
+import type { SecretMeta, SecretScheme } from "./secrets"
 import { createWebTools } from "./web-tools"
 import type { CrawlInput, QuickEngine } from "./web-tools"
 
@@ -120,6 +136,7 @@ const TOOL_CLASS: Record<string, ActionClass> = {
   browser_crawl: "browse",
   browser_execute: "browser",
   message_bot: "bots",
+  secret_request: "apps",
   schedule_routine: "routines",
   update_routine: "routines",
   start_teaching: "browser",
@@ -130,6 +147,50 @@ const TOOL_CLASS: Record<string, ActionClass> = {
 }
 
 const MAX_PREVIEW = 140
+/** A routine run still "running" after this long no longer blocks the next. */
+const ROUTINE_OVERLAP_MS = 30 * 60_000
+/** A failed routine run is retried once, this long after it failed. */
+const ROUTINE_RETRY_DELAY_S = 10 * 60
+/** No retry when the next scheduled run is closer than this. */
+const ROUTINE_RETRY_SKIP_MS = 30 * 60_000
+/** "Typing…" with no tool activity for this long, and no turn running, is stale. */
+const STALE_STATUS_MS = 10 * 60_000
+/** An unanswered approval card gets one push reminder after this long… */
+const APPROVAL_REMIND_MS = 4 * 3_600_000
+/** …and is closed as unanswered after this long. */
+const APPROVAL_EXPIRE_MS = 24 * 3_600_000
+/** exec returns a job id when a command takes longer than this. */
+const EXEC_WAIT_MS = 60_000
+/** How much of a watched output is kept and shown to the model, in characters. */
+const WATCH_SAMPLE_CHARS = 3_000
+/** Past this many app tools, the bot searches for tools instead of seeing all. */
+const LAZY_APP_TOOLS = 20
+/** Files one message_bot call can carry, and their combined size. */
+const MAX_BOT_FILES = 10
+const MAX_BOT_FILE_BYTES = 5 * 1024 * 1024
+/** A chain of bot-to-bot messages stops after this many bots. */
+const MAX_BOT_HOPS = 6
+/** Tools that only read: rerunning one after an interruption is harmless. */
+const READ_ONLY_TOOLS = new Set([
+  "read",
+  "ls",
+  "find",
+  "grep",
+  "browser_markdown",
+  "browser_extract",
+  "browser_links",
+  "browser_scrape",
+  "list_routines",
+  "list_secrets",
+  "app_tools_search",
+  "search_history",
+  "read_history",
+  "ask_user",
+  "shell_job",
+  "was_reported",
+  "list_apps",
+  "app_data_list",
+])
 /** A foreground turn longer than this gets a push when it finishes. */
 const LONG_TURN_MS = 90_000
 const MAX_OPEN_ITEMS_IN_PROMPT = 25
@@ -186,6 +247,58 @@ interface RoutinePayload {
   prompt: string
   kind: Routine["kind"]
   onlyNew?: boolean
+  watch?: RoutineWatch
+}
+
+interface RoutineRunRow {
+  id: string
+  routine_id: string
+  name: string
+  started_at: number
+  finished_at: number | null
+  status: RoutineRun["status"]
+  attempt: number
+  note: string
+}
+
+function toRoutineRun(r: RoutineRunRow): RoutineRun {
+  return {
+    id: r.id,
+    routineId: r.routine_id,
+    name: r.name,
+    startedAt: r.started_at,
+    finishedAt: r.finished_at,
+    status: r.status,
+    attempt: r.attempt,
+    note: r.note,
+  }
+}
+
+/** The approval id of a tool part waiting on the user, if it is one. */
+function pendingApprovalId(part: UIMessage["parts"][number]): string | null {
+  const p = part as {
+    state?: string
+    approval?: { id?: string }
+    toolCallId?: string
+  }
+  if (p.state !== "approval-requested") return null
+  return p.approval?.id ?? p.toolCallId ?? null
+}
+
+/** Close an approval nobody answered, so the card stops asking. */
+function expireApproval(
+  part: UIMessage["parts"][number]
+): UIMessage["parts"][number] {
+  const p = part as { approval?: Record<string, unknown> }
+  return {
+    ...part,
+    state: "output-denied",
+    approval: {
+      ...p.approval,
+      approved: false,
+      reason: "Nobody answered within 24 hours, so this was not done.",
+    },
+  } as UIMessage["parts"][number]
 }
 
 /** A Browser Run crawl the bot started, polled until it finishes. */
@@ -378,8 +491,6 @@ export class BotAgent extends Think<Env, BotState> {
     apps: [],
   }
 
-  /** `exec` from @cloudflare/computer replaces Think's built-in bash tool. */
-  override workspaceBash = false
   override maxSteps = 40
 
   /** Tools from the user's connections, refreshed from the hub each turn. */
@@ -404,8 +515,7 @@ export class BotAgent extends Think<Env, BotState> {
         egress: { mode: "direct" },
       }),
     ],
-    useThink: true,
-  }) as Workspace & ThinkWorkspaceCompatibility
+  })
 
   #browser?: BrowserRuntime
   /** App tools a background turn may call without anyone approving. */
@@ -414,6 +524,18 @@ export class BotAgent extends Think<Env, BotState> {
   #appStore?: AppStore
   /** The user's bdots origin, from the hub each turn. Empty until known. */
   #origin = ""
+  #reports: Promise<void> = Promise.resolve()
+  /** Shell commands share one backend, so they run one at a time. */
+  #shell: Promise<unknown> = Promise.resolve()
+  #loopGuard = new LoopGuard()
+  /** Shell commands still running after exec returned. Lost on restart. */
+  #jobs = new Map<
+    string,
+    { command: string; startedAt: number; result: Promise<unknown> }
+  >()
+  /** In memory only: a restart ends any turn, and onStart resets status. */
+  #turnActive = false
+  #lastActivity = 0
 
   /** Apps this bot built, their links and their data. */
   private get apps(): AppStore {
@@ -448,14 +570,21 @@ export class BotAgent extends Think<Env, BotState> {
     )
   }
 
-  /** Best-effort: the sidebar is a cache, a failed report must not fail a turn. */
-  private async report(patch: Parameters<UserHub["reportBot"]>[1]) {
-    try {
-      const hub = await this.hub()
-      await hub.reportBot(this.botId, patch)
-    } catch (err) {
-      console.error("reportBot failed", err)
-    }
+  /**
+   * Best-effort: the sidebar is a cache, a failed report must not fail a turn.
+   * Reports are queued so a slow "working" can never land after the turn's
+   * "idle" and leave the sidebar stuck on Typing.
+   */
+  private report(patch: Parameters<UserHub["reportBot"]>[1]) {
+    this.#reports = this.#reports.then(async () => {
+      try {
+        const hub = await this.hub()
+        await hub.reportBot(this.botId, patch)
+      } catch (err) {
+        console.error("reportBot failed", err)
+      }
+    })
+    return this.#reports
   }
 
   private async setStatus(status: BotStatus) {
@@ -503,6 +632,42 @@ export class BotAgent extends Think<Env, BotState> {
       note TEXT NOT NULL DEFAULT '',
       at INTEGER NOT NULL
     )`
+    // Credentials the user typed into a request_secret card. Never in state,
+    // never in a message, never sent to the model.
+    this.sql`CREATE TABLE IF NOT EXISTS bot_secrets (
+      name TEXT PRIMARY KEY,
+      origin TEXT NOT NULL,
+      scheme TEXT NOT NULL,
+      header TEXT NOT NULL,
+      purpose TEXT NOT NULL,
+      value TEXT,
+      created_at INTEGER NOT NULL
+    )`
+    // Every version of the memory block, so a bad edit can be undone.
+    this.sql`CREATE TABLE IF NOT EXISTS memory_revisions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      content TEXT NOT NULL
+    )`
+    // The last output a watching routine saw, to tell whether it changed.
+    this.sql`CREATE TABLE IF NOT EXISTS routine_watch (
+      routine_id TEXT PRIMARY KEY,
+      fingerprint TEXT NOT NULL,
+      sample TEXT NOT NULL,
+      checked_at INTEGER NOT NULL
+    )`
+    // Every routine run and how it ended, for retries, overlap and history.
+    this.sql`CREATE TABLE IF NOT EXISTS routine_runs (
+      id TEXT PRIMARY KEY,
+      routine_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      finished_at INTEGER,
+      status TEXT NOT NULL,
+      attempt INTEGER NOT NULL DEFAULT 1,
+      note TEXT NOT NULL DEFAULT ''
+    )`
     // One row per unprompted message, for the daily cap.
     this.sql`CREATE TABLE IF NOT EXISTS proactive_log (
       at INTEGER NOT NULL
@@ -528,6 +693,12 @@ export class BotAgent extends Think<Env, BotState> {
     if (this.state.status === "thinking" || this.state.status === "working") {
       this.setState({ ...this.state, status: "idle" })
     }
+    if (!this.getSchedules().some((s) => s.callback === "sweepStuck")) {
+      await this.scheduleEvery(15 * 60, "sweepStuck")
+    }
+    // The hub may still hold a status from before the restart. A bot the hub
+    // does not know yet (mid-create) is ignored there.
+    if (this.name) void this.report({ status: this.state.status })
   }
 
   /** Called once by the UserHub right after the bot is created. */
@@ -562,7 +733,9 @@ export class BotAgent extends Think<Env, BotState> {
     if (!p?.enabled) return {}
     return {
       "check-in": {
-        schedule: `every ${p.everyHours} hours` as ThinkIntervalSchedule,
+        // Think rejects "every 1 hours": the unit must agree with the count.
+        schedule:
+          `every ${p.everyHours} ${p.everyHours === 1 ? "hour" : "hours"}` as ThinkIntervalSchedule,
         handler: async ({ idempotencyKey }) => {
           await this.checkIn({ key: idempotencyKey })
         },
@@ -660,16 +833,16 @@ export class BotAgent extends Think<Env, BotState> {
       : this.getModel()
   }
 
+  #ai?: AI
+
   private resolveModelId(model: string) {
-    // Workers AI ids go through the binding directly unless an AI Gateway is
-    // configured; "<provider>/<model>" slugs are always routed via AI Gateway.
-    if (model.startsWith("@cf/") && this.env.AI_GATEWAY_ID) {
-      return createWorkersAI({
-        binding: this.env.AI,
-        gateway: { id: this.env.AI_GATEWAY_ID },
-      })(model)
-    }
-    return model
+    // One provider for "@cf/…" Workers AI ids, "<author>/<model>" catalog
+    // slugs and "dynamic/<route>" routes, through AI_GATEWAY_ID when set.
+    this.#ai ??= createAI({
+      binding: this.env.AI,
+      gateway: this.env.AI_GATEWAY_ID?.trim() || undefined,
+    })
+    return this.#ai(model as CloudflareLanguageModelId)
   }
 
   override configureContext(): ContextConfig[] {
@@ -712,21 +885,33 @@ export class BotAgent extends Think<Env, BotState> {
     const system = (await this.refreshSoulIfChanged()) ?? ctx.system
     let others: Awaited<ReturnType<UserHub["listBots"]>> = []
     let catalog: AppCatalog = { apps: [], tools: [] }
+    let sharedMemory = ""
     try {
       const hub = await this.hub()
       let origin: string | null
-      ;[others, catalog, origin] = await Promise.all([
+      ;[others, catalog, origin, sharedMemory] = await Promise.all([
         hub.listBots().then((bots) => bots.filter((b) => b.id !== this.botId)),
         hub.appCatalog(),
         hub.appOrigin(),
+        // In the per-turn context rather than a context block: it is fresh
+        // every turn, and a block's "remind" message breaks approval
+        // continuations (it lands after the approval response).
+        hub.sharedMemory(),
       ])
       this.#origin = origin ?? ""
     } catch (err) {
       console.error("Loading bots or apps failed", err)
     }
     this.#turnStartedAt = Date.now()
+    this.#turnActive = true
+    this.#lastActivity = Date.now()
+    this.#loopGuard.reset()
     this.#appTools = this.buildAppTools(catalog)
-    this.#appToolNames = new Set(Object.keys(this.#appTools))
+    this.#appToolNames = new Set([
+      ...Object.keys(this.#appTools),
+      // In lazy mode these are reached through app_tool_call.
+      ...catalog.tools.map((t) => appToolName(t.connectionId, t.name)),
+    ])
     this.#readOnlyAppTools = new Set(
       catalog.tools
         .filter((t) => t.readOnly)
@@ -735,6 +920,7 @@ export class BotAgent extends Think<Env, BotState> {
     const context = turnContext(this.state, others, catalog.apps, {
       openItems: this.openItems(),
       inbound: this.inbound(),
+      sharedMemory,
       builtApps: this.apps.list().map((app) => ({
         ...app,
         path: `${this.#origin}${this.apps.ownerLink(app.slug).path}`,
@@ -791,6 +977,9 @@ export class BotAgent extends Think<Env, BotState> {
   }
 
   private policyFor(toolName: string): RulePolicy {
+    // The stand-in for a broken app only explains; it never acts.
+    if (toolName.endsWith("_unavailable") && this.#appToolNames.has(toolName))
+      return "allow"
     const cls = this.#appToolNames.has(toolName) ? "apps" : TOOL_CLASS[toolName]
     return cls ? this.state.rules[cls] : "allow"
   }
@@ -814,8 +1003,113 @@ export class BotAgent extends Think<Env, BotState> {
   }
 
   /** Wrap the hub's catalog as AI SDK tools that call back through the hub. */
+  /**
+   * Many app tools would flood every request with schemas. Past
+   * LAZY_APP_TOOLS the bot searches for the tool it needs, then calls it.
+   */
+  private lazyAppTools(catalog: AppCatalog): ToolSet {
+    const byName = new Map(
+      catalog.tools.map(
+        (t) => [appToolName(t.connectionId, t.name), t] as const
+      )
+    )
+    return {
+      app_tools_search: tool({
+        description: `Find a tool in the user's connected apps (${catalog.apps
+          .filter((a) => a.status === "ready")
+          .map((a) => a.name)
+          .join(
+            ", "
+          )}). Returns names, descriptions and argument schemas for app_tool_call.`,
+        inputSchema: z.object({
+          query: z
+            .string()
+            .describe(
+              "What you want to do, e.g. 'search email' or 'create issue'"
+            ),
+        }),
+        execute: async ({ query }) => {
+          const words = query
+            .toLowerCase()
+            .split(/\W+/)
+            .filter((w) => w.length > 1)
+          const scored = [...byName.entries()]
+            .map(([name, t]) => {
+              const hay =
+                `${t.connectionName} ${t.name} ${t.description}`.toLowerCase()
+              return {
+                name,
+                t,
+                score: words.filter((w) => hay.includes(w)).length,
+              }
+            })
+            .filter((x) => x.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 8)
+          return {
+            tools: scored.map(({ name, t }) => ({
+              name,
+              app: t.connectionName,
+              description: clip(t.description, 300),
+              readOnly: t.readOnly,
+              inputSchema: t.inputSchema,
+            })),
+            ...(scored.length
+              ? {}
+              : {
+                  note: "Nothing matched. Try other words, or the app may not offer this.",
+                }),
+          }
+        },
+      }),
+      app_tool_call: tool({
+        description: "Call a connected-app tool found with app_tools_search.",
+        inputSchema: z.object({
+          tool: z.string().describe("The name app_tools_search returned"),
+          args: z.record(z.string(), z.unknown()).optional(),
+        }),
+        // The rule for the tool itself applies, as if it were called directly.
+        needsApproval: async ({ tool: name }) => this.decide(name) === "ask",
+        execute: async ({ tool: name, args }) => {
+          const t = byName.get(name)
+          if (!t)
+            return {
+              error: "Unknown tool. Find it with app_tools_search first.",
+            }
+          const hub = await this.hub()
+          return unwrapToolResult(
+            await hub.callAppTool(t.connectionId, t.name, args ?? {})
+          )
+        },
+      }),
+    }
+  }
+
   private buildAppTools(catalog: AppCatalog): ToolSet {
     const tools: ToolSet = {}
+    // An app that is not ready has no tools to list. Without a stand-in the
+    // bot would say the app is not connected; this lets it say what is wrong.
+    for (const app of catalog.apps) {
+      if (app.status === "ready") continue
+      const problem =
+        app.status === "authenticating"
+          ? `${app.name} is waiting for the user to sign in.`
+          : app.status === "connecting" || app.status === "discovering"
+            ? `${app.name} is still connecting.`
+            : `${app.name} failed to connect${app.error ? `: ${app.error}` : "."}`
+      tools[appToolName(app.id, "unavailable")] = tool({
+        description: `[${app.name}] Not available right now. Call this only to learn why, if the user asks for something in ${app.name}.`,
+        inputSchema: z.object({}),
+        execute: async () => ({
+          available: false,
+          problem,
+          tellTheUser: `${problem} They can fix it in Connections. Offer the browser in the meantime if that would work.`,
+        }),
+      })
+    }
+    if (catalog.tools.length > LAZY_APP_TOOLS) {
+      return { ...tools, ...this.lazyAppTools(catalog) }
+    }
     for (const t of catalog.tools) {
       tools[appToolName(t.connectionId, t.name)] = tool({
         description: `[${t.connectionName}] ${t.description}`.trim(),
@@ -859,6 +1153,40 @@ export class BotAgent extends Think<Env, BotState> {
       ...this.botTools(),
     }
 
+    // The model often runs several exec calls in one step. They share one
+    // shell session, and running them at once mixes their output.
+    // A slow command returns a job id after EXEC_WAIT_MS instead of holding
+    // the step; shell_job waits on it, so the work stays in this turn.
+    const exec = tools.exec
+    if (exec?.execute) {
+      const run = exec.execute.bind(exec)
+      tools.exec = {
+        ...exec,
+        execute: async (input, options) => {
+          const result = this.#shell.then(() => run(input, options))
+          this.#shell = result.catch(() => undefined)
+          const command = String((input as { command?: unknown }).command ?? "")
+          return this.waitOrPark(command, result)
+        },
+      }
+      tools.shell_job = tool({
+        description:
+          "Wait for a shell command that exec reported as still running. Waits up to 60 seconds per call and returns its output once it finishes. Call it again while it says running.",
+        inputSchema: z.object({
+          id: z.string().describe("The job id exec returned"),
+        }),
+        execute: async ({ id }) => {
+          const job = this.#jobs.get(id)
+          if (!job) {
+            return {
+              error:
+                "No such job. It finished and was already collected, or the bot restarted and it was lost. Check its effects before running the command again.",
+            }
+          }
+          return this.waitOrPark(job.command, job.result, id)
+        },
+      })
+    }
     // Apply the user's rules: "ask" pauses the call for an approval card.
     // "block" is enforced in beforeToolCall.
     for (const [name, def] of Object.entries(tools)) {
@@ -902,16 +1230,233 @@ export class BotAgent extends Think<Env, BotState> {
         }),
       }),
 
+      remember: tool({
+        description:
+          "Save one durable fact to your memory: a preference, a person, a correction, how the user wants something done. One short, plain fact with no pronouns for the user (e.g. 'Wants names of 8 letters or fewer'). Skips facts you already have. Use set_context instead to rewrite or remove lines.",
+        inputSchema: z.object({ fact: z.string().max(300) }),
+        execute: async ({ fact }) => {
+          const current = this.session.getContextBlock("memory")?.content ?? ""
+          const result = appendFact(current, fact)
+          if ("duplicate" in result)
+            return { saved: false, reason: "Already in memory." }
+          if ("error" in result) return { saved: false, error: result.error }
+          await this.session.replaceContextBlock("memory", result.content)
+          this.logMemory("bot", result.content)
+          return { saved: true }
+        },
+      }),
+
+      remember_for_all_bots: tool({
+        description:
+          "Save a fact every one of the user's bots should know (their name, time zone, team, a standing preference). Only things that are true across jobs; job-specific facts go in remember. Write it as a plain fact with no pronouns, e.g. 'Name: Sam' or 'Time zone: IST'.",
+        inputSchema: z.object({ fact: z.string().max(300) }),
+        execute: async ({ fact }) => {
+          const hub = await this.hub()
+          return hub.rememberShared(fact, this.state.name)
+        },
+      }),
+
+      search_history: tool({
+        description:
+          "Search everything said in this chat, including messages too old to be in your context. Use it before claiming you remember something exactly. Returns up to 5 matches with ids for read_history.",
+        inputSchema: z.object({
+          query: z.string().min(2).describe("Words to look for"),
+        }),
+        execute: async ({ query }) => {
+          // The index matches the query as one exact phrase. When that
+          // misses, fall back to its words and rank messages by how many hit.
+          let hits = await this.session.search(query, { limit: 5 })
+          if (hits.length === 0) {
+            const words = [
+              ...new Set(query.toLowerCase().split(/[^\p{L}\p{N}@.]+/u)),
+            ].filter((w) => w.length > 2)
+            const seen = new Map<
+              string,
+              { hit: (typeof hits)[number]; n: number }
+            >()
+            for (const word of words.slice(0, 6)) {
+              for (const hit of await this.session.search(word, {
+                limit: 10,
+              })) {
+                const entry = seen.get(hit.id)
+                if (entry) entry.n++
+                else seen.set(hit.id, { hit, n: 1 })
+              }
+            }
+            hits = [...seen.values()]
+              .sort((a, b) => b.n - a.n)
+              .slice(0, 5)
+              .map((e) => e.hit)
+          }
+          return {
+            matches: hits.map((hit) => ({
+              id: hit.id,
+              role: hit.role,
+              at: hit.createdAt,
+              text: clip(hit.content.replace(/\s+/g, " "), 400),
+            })),
+            note: hits.length
+              ? "Snippets only. Use read_history for the surrounding messages and any later correction."
+              : "No matches. Say you do not have it rather than guessing.",
+          }
+        },
+      }),
+
+      read_history: tool({
+        description:
+          "Read the messages around one found with search_history, to see context and later corrections.",
+        inputSchema: z.object({
+          id: z.string(),
+          around: z
+            .number()
+            .int()
+            .min(0)
+            .max(5)
+            .optional()
+            .describe("Messages before and after, default 2"),
+        }),
+        execute: async ({ id, around = 2 }) => {
+          const history = await this.session.getHistory()
+          const index = history.findIndex((m) => m.id === id)
+          if (index === -1) return { error: "No message with that id." }
+          return {
+            messages: history
+              .slice(Math.max(0, index - around), index + around + 1)
+              .map((m) => ({
+                id: m.id,
+                role: m.role,
+                at: metaOf(m as UIMessage).at
+                  ? new Date(metaOf(m as UIMessage).at!).toISOString()
+                  : undefined,
+                // One message on its own is read in full, or close to it.
+                text: clip(textOf(m as UIMessage), around === 0 ? 6000 : 1500),
+              })),
+          }
+        },
+      }),
+
+      request_secret: tool({
+        description:
+          "Ask the user for an API key or token for one HTTPS service. They type it into a masked card; you never see it. Afterwards call secret_request with its name to make authenticated requests. Never ask for credentials in the chat.",
+        inputSchema: z.object({
+          name: z
+            .string()
+            .describe("Short id you will refer to it by, e.g. GITHUB_TOKEN"),
+          origin: z
+            .string()
+            .describe(
+              "The only HTTPS origin it may be sent to, e.g. https://api.github.com"
+            ),
+          scheme: z
+            .enum(["bearer", "header", "basic"])
+            .describe(
+              "bearer: Authorization: Bearer <value>. header: a custom header. basic: user:password"
+            ),
+          header: z
+            .string()
+            .optional()
+            .describe("For scheme header: the header name, e.g. X-API-Key"),
+          purpose: z
+            .string()
+            .max(140)
+            .describe("One line the user sees: what you need it for"),
+        }),
+        // The card is an approval: the value goes to provideSecret over the
+        // user's socket, and the approval only says it was saved.
+        needsApproval: true,
+        execute: async ({ name }) => {
+          const row = this.sql<{
+            value: string | null
+          }>`SELECT value FROM bot_secrets WHERE name = ${name}`[0]
+          return row?.value
+            ? { saved: true, name, next: "Use secret_request with this name." }
+            : { saved: false, name, note: "The user did not enter it." }
+        },
+      }),
+
+      secret_request: tool({
+        description:
+          "Make an HTTPS request with a saved credential attached. The URL must be on the origin it was saved for. The response comes back with the credential redacted.",
+        inputSchema: z.object({
+          name: z.string(),
+          url: z.string(),
+          method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]).optional(),
+          headers: z.record(z.string(), z.string()).optional(),
+          body: z.string().optional().describe("Request body, e.g. JSON text"),
+        }),
+        // Reads are free; writes follow the user's rule for apps.
+        needsApproval: async ({ method }) =>
+          (method ?? "GET") !== "GET" &&
+          this.decide("secret_request") === "ask",
+        execute: async ({ name, url, method = "GET", headers = {}, body }) =>
+          this.secretRequest(name, url, method, headers, body),
+      }),
+
+      list_secrets: tool({
+        description:
+          "List the credentials you have saved: names, origins and purposes, never values.",
+        inputSchema: z.object({}),
+        execute: async () => ({ secrets: this.listSecretMeta() }),
+      }),
+
+      ask_user: tool({
+        description:
+          "Ask the user one short question with 2-4 tappable answers, when their choice changes what you do next (which account, which of a few options, go or wait). Prefer it over asking them to type when a few options cover it. You get back the option they picked. If they reply in the chat instead, the call ends and their message is your answer.",
+        inputSchema: z.object({
+          question: z.string().max(200),
+          options: z.array(z.string().max(60)).min(2).max(4),
+        }),
+        // The card is an approval. Approvals do not carry the tapped option,
+        // so the card hands it over with answerChoice() before approving.
+        needsApproval: true,
+        execute: async (_input, { toolCallId }) => {
+          const answer = this.ctx.storage.kv.get<string>(`choice:${toolCallId}`)
+          this.ctx.storage.kv.delete(`choice:${toolCallId}`)
+          return answer
+            ? { answer }
+            : {
+                answer: null,
+                note: "They confirmed without picking an option.",
+              }
+        },
+      }),
+
       message_bot: tool({
         description:
           "Send a message to another of the user's bots, to delegate work or pass on something it needs. It replies in its own thread.",
         inputSchema: z.object({
           to: z.string().describe("The other bot's name"),
           message: z.string(),
+          files: z
+            .array(z.string())
+            .max(MAX_BOT_FILES)
+            .optional()
+            .describe(
+              "Your own files to send along (paths under /workspace). Each bot has its own computer, so the other bot cannot open your paths: attach the file instead. They are copied into its inbox."
+            ),
         }),
-        execute: async ({ to, message }) => {
+        execute: async ({ to, message, files = [] }, { toolCallId }) => {
+          const hops =
+            (metaOf(this.messages.findLast((m) => m.role === "user")).hops ??
+              0) + 1
+          if (hops > MAX_BOT_HOPS) {
+            return {
+              delivered: false,
+              error: `This conversation has already passed through ${MAX_BOT_HOPS} bots. Do not forward it again: finish the work yourself or tell the user.`,
+            }
+          }
+          const attachments = await this.readAttachments(files)
+          if ("error" in attachments) {
+            return { delivered: false, error: attachments.error }
+          }
           const hub = await this.hub()
-          return hub.relayMessage(this.botId, to, message)
+          // Keyed on the tool call, so a recovered turn that re-runs this call
+          // does not deliver the message twice.
+          return hub.relayMessage(this.botId, to, message, {
+            key: `bot:${this.botId}:${toolCallId}`,
+            hops,
+            ...(attachments.files.length ? { files: attachments.files } : {}),
+          })
         },
       }),
 
@@ -933,8 +1478,27 @@ export class BotAgent extends Think<Env, BotState> {
             .describe(
               "Only message the user about things not reported on an earlier run, and stay quiet otherwise. Use it for routines that run more than daily, or when the user wants changes only. Each run is told how to track what it reported, so the prompt does not need to explain it."
             ),
+          watch: z
+            .union([
+              z.object({
+                url: z
+                  .string()
+                  .describe("A public http(s) page or API to fetch"),
+              }),
+              z.object({
+                command: z
+                  .string()
+                  .describe(
+                    "A shell command whose output to compare, e.g. a curl | jq"
+                  ),
+              }),
+            ])
+            .optional()
+            .describe(
+              "For 'tell me when X changes': checked before each run without using the model. The first check records a baseline, unchanged output skips the run, and a change runs you with the before and after."
+            ),
         }),
-        execute: async ({ name, prompt, cron, at, onlyNew }) => {
+        execute: async ({ name, prompt, cron, at, onlyNew, watch }) => {
           if (!cron === !at) {
             return { error: "Provide exactly one of `cron` or `at`." }
           }
@@ -944,6 +1508,7 @@ export class BotAgent extends Think<Env, BotState> {
             when: (cron ?? at)!,
             kind: cron ? "cron" : "once",
             ...(onlyNew ? { onlyNew: true } : {}),
+            ...(watch ? { watch } : {}),
           })
           return { scheduled: routine }
         },
@@ -959,6 +1524,26 @@ export class BotAgent extends Think<Env, BotState> {
           cron: z.string().optional(),
           at: z.string().optional(),
           onlyNew: z.boolean().optional(),
+          watch: z
+            .union([
+              z.object({
+                url: z
+                  .string()
+                  .describe("A public http(s) page or API to fetch"),
+              }),
+              z.object({
+                command: z
+                  .string()
+                  .describe(
+                    "A shell command whose output to compare, e.g. a curl | jq"
+                  ),
+              }),
+            ])
+            .nullable()
+            .optional()
+            .describe(
+              "Pass null to stop watching. For 'tell me when X changes': checked before each run without using the model. The first check records a baseline, unchanged output skips the run, and a change runs you with the before and after."
+            ),
         }),
         execute: async ({ id, cron, at, ...patch }) => {
           if (cron && at) {
@@ -976,7 +1561,23 @@ export class BotAgent extends Think<Env, BotState> {
       list_routines: tool({
         description: "List your scheduled routines.",
         inputSchema: z.object({}),
-        execute: async () => ({ routines: this.state.routines }),
+        execute: async () => ({
+          routines: this.state.routines.map((r) => {
+            const last = this.sql<RoutineRunRow>`SELECT * FROM routine_runs
+              WHERE routine_id = ${r.id} AND status != 'running'
+              ORDER BY started_at DESC LIMIT 1`[0]
+            return last
+              ? {
+                  ...r,
+                  lastRun: {
+                    status: last.status,
+                    at: new Date(last.started_at).toISOString(),
+                    note: last.note,
+                  },
+                }
+              : r
+          }),
+        }),
       }),
 
       cancel_routine: tool({
@@ -1839,12 +2440,110 @@ export class BotAgent extends Think<Env, BotState> {
     }
   }
 
+  /**
+   * The command's result if it finishes within EXEC_WAIT_MS, otherwise a
+   * job id to wait on with shell_job.
+   */
+  private async waitOrPark(
+    command: string,
+    result: Promise<unknown>,
+    jobId?: string
+  ) {
+    const TIMEOUT = Symbol("timeout")
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const outcome = await Promise.race([
+      result.then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error })
+      ),
+      new Promise<typeof TIMEOUT>((resolve) => {
+        timer = setTimeout(() => resolve(TIMEOUT), EXEC_WAIT_MS)
+      }),
+    ])
+    clearTimeout(timer)
+    if (outcome !== TIMEOUT) {
+      if (jobId) this.#jobs.delete(jobId)
+      if ("error" in outcome) throw outcome.error
+      return outcome.value
+    }
+    const id = jobId ?? crypto.randomUUID().slice(0, 8)
+    const job = this.#jobs.get(id) ?? { command, startedAt: Date.now(), result }
+    this.#jobs.set(id, job)
+    return {
+      running: true,
+      job: id,
+      runningForSeconds: Math.round((Date.now() - job.startedAt) / 1000),
+      notice:
+        "Still running. Call shell_job with this id to wait for the output. If the command printed a one-time code or sign-in URL the user needs, tell them now. Next time, split slow work into smaller batches.",
+    }
+  }
+
+  /** Keep long turns inside the context window (see shapeToolResults). */
+  override beforeStep(ctx: PrepareStepContext): StepConfig | void {
+    const messages = shapeToolResults(ctx.messages)
+    // Think's StepConfig is an Omit over a union, which drops `messages`
+    // from the type; the AI SDK accepts it (and carries it forward).
+    if (messages) return { messages } as StepConfig
+  }
+
+  /**
+   * A tool call cut off by an eviction or crash. Think records it as failed,
+   * but for anything with side effects "failed" is a guess: the send or
+   * write may have gone through. Say so, so the model checks before it
+   * repeats the action.
+   */
+  protected override repairInterruptedToolPart(
+    part: UIMessage["parts"][number]
+  ): UIMessage["parts"][number] {
+    const record = part as { type: string; toolName?: string }
+    const name =
+      record.type === "dynamic-tool"
+        ? (record.toolName ?? "")
+        : record.type.replace(/^tool-/, "")
+    const safe = READ_ONLY_TOOLS.has(name) || this.#readOnlyAppTools.has(name)
+    // A card the user moved past by sending a new message. Nothing ran.
+    if ((part as { state?: string }).state === "approval-requested") {
+      return {
+        ...part,
+        state: "output-error",
+        errorText:
+          name === "ask_user"
+            ? "The user did not pick an option. They replied in the chat instead: their newest message is the answer."
+            : "Not done: the user sent a new message instead of approving this. If it still matters, ask again.",
+      } as UIMessage["parts"][number]
+    }
+    return {
+      ...part,
+      state: "output-error",
+      errorText: safe
+        ? "This call was interrupted before it returned. It only reads, so it is safe to run again."
+        : "This call was interrupted before a result was recorded, so it may or may not have taken effect. Check the destination (the app, page, file or bot) before doing it again, and never repeat it blindly.",
+    } as UIMessage["parts"][number]
+  }
+
   override beforeToolCall(ctx: ToolCallContext): ToolCallDecision | void {
-    if (this.decide(ctx.toolName) === "block") {
+    this.#lastActivity = Date.now()
+    // Waiting on a job repeats the same call by design.
+    const looping =
+      ctx.toolName === "shell_job"
+        ? null
+        : this.#loopGuard.check(ctx.toolName, ctx.input)
+    if (looping) return { action: "block", reason: looping }
+    const readOnlySecretCall =
+      ctx.toolName === "secret_request" &&
+      ((ctx.input as { method?: string } | undefined)?.method ?? "GET") ===
+        "GET"
+    const ruled =
+      ctx.toolName === "app_tool_call"
+        ? String((ctx.input as { tool?: string } | undefined)?.tool ?? "")
+        : ctx.toolName
+    if (ctx.toolName === "app_tools_search") {
+      // Searching the catalog touches nothing.
+    } else if (!readOnlySecretCall && this.decide(ruled) === "block") {
       return {
         action: "block",
         reason:
-          this.policyFor(ctx.toolName) === "block"
+          this.policyFor(ruled) === "block"
             ? "The user has blocked this kind of action for you. Tell them what you wanted to do instead of retrying."
             : "This is background work and this action needs the user's approval, which they cannot give right now. Do not retry. If it matters, tell them what you would do.",
       }
@@ -1855,6 +2554,13 @@ export class BotAgent extends Think<Env, BotState> {
   }
 
   override afterToolCall(ctx: ToolCallResultContext) {
+    this.#lastActivity = Date.now()
+    if (ctx.toolName === "set_context" && ctx.success) {
+      this.logMemory(
+        "bot",
+        this.session.getContextBlock("memory")?.content ?? ""
+      )
+    }
     const input = (ctx.input ?? {}) as Record<string, unknown>
     const summary = clip(
       String(
@@ -1893,6 +2599,7 @@ export class BotAgent extends Think<Env, BotState> {
   }
 
   override async onChatResponse(result: ChatResponseResult) {
+    this.#turnActive = false
     const trigger = this.triggerOf(result.message)
     const background = metaOf(trigger).background === true
     const waiting = result.message.parts.some(
@@ -1900,6 +2607,14 @@ export class BotAgent extends Think<Env, BotState> {
     )
     const text = textOf(result.message)
     const status: BotStatus = waiting ? "action_needed" : "idle"
+    if (waiting) this.noteApprovalsAsked(result.message)
+    const routineRun = metaOf(trigger).routine
+    if (routineRun) {
+      await this.finishRoutineRun(routineRun, result, {
+        waiting,
+        quiet: !text || isNoUpdate(finalText(result.message)),
+      })
+    }
     this.setState({
       ...this.state,
       status,
@@ -1947,8 +2662,15 @@ export class BotAgent extends Think<Env, BotState> {
     const longTurn =
       this.#turnStartedAt > 0 && Date.now() - this.#turnStartedAt > LONG_TURN_MS
     if (waiting) {
+      const question = result.message.parts.find(
+        (p) => p.type === "tool-ask_user" && pendingApprovalId(p)
+      ) as { input?: { question?: string } } | undefined
       await this.notify(
-        preview ? `Needs your OK: ${preview}` : "Needs your OK to continue"
+        question?.input?.question
+          ? clip(question.input.question, 160)
+          : preview
+            ? `Needs your OK: ${preview}`
+            : "Needs your OK to continue"
       )
     } else if ((background || longTurn) && preview) {
       await this.notify(preview)
@@ -1989,8 +2711,276 @@ export class BotAgent extends Think<Env, BotState> {
   }
 
   override onChatError(error: unknown) {
+    this.#turnActive = false
     void this.setStatus("idle")
     return error
+  }
+
+  // ── Stuck work ──────────────────────────────────────────────────────
+
+  /** Remember when each approval card first appeared, for reminders. */
+  private noteApprovalsAsked(message: UIMessage) {
+    for (const part of message.parts) {
+      const id = pendingApprovalId(part)
+      if (id && this.ctx.storage.kv.get(`approval_at:${id}`) === undefined) {
+        this.ctx.storage.kv.put(`approval_at:${id}`, Date.now())
+      }
+    }
+  }
+
+  /**
+   * Schedule callback, every 15 minutes. Nothing waits forever without the
+   * user hearing about it, and the sidebar cannot stay on "Typing…" after
+   * the work has stopped.
+   */
+  async sweepStuck() {
+    const now = Date.now()
+    const busy =
+      this.state.status === "thinking" || this.state.status === "working"
+    if (
+      busy &&
+      !this.#turnActive &&
+      now - this.#lastActivity > STALE_STATUS_MS
+    ) {
+      this.setState({
+        ...this.state,
+        status: this.hasPendingApproval() ? "action_needed" : "idle",
+      })
+    }
+    // The hub is only a cache of this; heal it on every sweep.
+    void this.report({ status: this.state.status })
+
+    for (const message of this.messages) {
+      if (message.role !== "assistant") continue
+      let changed = false
+      const parts = message.parts.map((part) => {
+        const id = pendingApprovalId(part)
+        if (!id) return part
+        const asked = this.ctx.storage.kv.get<number>(`approval_at:${id}`)
+        if (asked === undefined) {
+          this.ctx.storage.kv.put(`approval_at:${id}`, now)
+          return part
+        }
+        if (now - asked > APPROVAL_EXPIRE_MS) {
+          changed = true
+          this.ctx.storage.kv.delete(`approval_at:${id}`)
+          this.ctx.storage.kv.delete(`approval_reminded:${id}`)
+          return expireApproval(part)
+        }
+        if (
+          now - asked > APPROVAL_REMIND_MS &&
+          this.ctx.storage.kv.get(`approval_reminded:${id}`) === undefined
+        ) {
+          this.ctx.storage.kv.put(`approval_reminded:${id}`, now)
+          void this.notify(
+            `Still waiting for your OK: ${clip(textOf(message) || this.state.name, 120)}`
+          )
+        }
+        return part
+      })
+      if (!changed) continue
+      const updated: UIMessage = { ...message, parts }
+      try {
+        await this.updateMessageInHistory(updated)
+        this.broadcast(
+          JSON.stringify({
+            type: CHAT_MESSAGE_TYPES.MESSAGE_UPDATED,
+            message: updated,
+          })
+        )
+      } catch (err) {
+        console.error("Expiring an approval failed", err)
+      }
+    }
+    if (this.state.status === "action_needed" && !this.hasPendingApproval()) {
+      await this.setStatus("idle")
+    }
+  }
+
+  // ── Secrets ─────────────────────────────────────────────────────────
+
+  private listSecretMeta(): SecretMeta[] {
+    return this.sql<{
+      name: string
+      origin: string
+      scheme: SecretScheme
+      header: string
+      purpose: string
+      created_at: number
+    }>`SELECT name, origin, scheme, header, purpose, created_at FROM bot_secrets
+      WHERE value IS NOT NULL ORDER BY name`.map((r) => ({
+      name: r.name,
+      origin: r.origin,
+      scheme: r.scheme,
+      header: r.header,
+      purpose: r.purpose,
+      createdAt: r.created_at,
+    }))
+  }
+
+  private async secretRequest(
+    name: string,
+    url: string,
+    method: string,
+    headers: Record<string, string>,
+    body: string | undefined
+  ) {
+    const row = this.sql<{
+      origin: string
+      scheme: SecretScheme
+      header: string
+      purpose: string
+      value: string | null
+      created_at: number
+    }>`
+      SELECT origin, scheme, header, purpose, value, created_at FROM bot_secrets WHERE name = ${name}`[0]
+    if (!row?.value) {
+      return {
+        error: `No saved credential named ${name}. Ask for it with request_secret.`,
+      }
+    }
+    if (httpsOrigin(url) !== row.origin) {
+      return {
+        error: `${name} may only be sent to ${row.origin}. That URL is not on it.`,
+      }
+    }
+    const meta: SecretMeta = {
+      name,
+      origin: row.origin,
+      scheme: row.scheme,
+      header: row.header,
+      purpose: row.purpose,
+      createdAt: row.created_at,
+    }
+    const [key, value] = authHeader(meta, row.value)
+    const controller = new AbortController()
+    const timer = setTimeout(
+      () => controller.abort(),
+      SECRET_REQUEST_TIMEOUT_MS
+    )
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: { ...headers, [key]: value },
+        body: method === "GET" ? undefined : body,
+        // A redirect could carry the credential to another origin.
+        redirect: "manual",
+        signal: controller.signal,
+      })
+      if (response.status >= 300 && response.status < 400) {
+        return {
+          status: response.status,
+          error:
+            "The service redirected. Redirects are not followed with a credential attached; use the final URL directly.",
+        }
+      }
+      const text = redact(await response.text(), row.value)
+      return {
+        status: response.status,
+        contentType: response.headers.get("content-type"),
+        body:
+          text.length > MAX_SECRET_RESPONSE_CHARS
+            ? `${text.slice(0, MAX_SECRET_RESPONSE_CHARS)}\n[Truncated: ${text.length} characters in total.]`
+            : text,
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return {
+        error: redact(
+          controller.signal.aborted
+            ? "The request timed out after 30 seconds."
+            : message,
+          row.value
+        ),
+      }
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /**
+   * Called from the request_secret card over the user's own socket, before
+   * the card is approved. The value never enters the chat.
+   */
+  @callable()
+  async provideSecret(toolCallId: string, value: string) {
+    const part = this.messages
+      .flatMap((m) => m.parts)
+      .find((p) => (p as { toolCallId?: string }).toolCallId === toolCallId) as
+      | {
+          type: string
+          state?: string
+          input?: {
+            name?: string
+            origin?: string
+            scheme?: string
+            header?: string
+            purpose?: string
+          }
+        }
+      | undefined
+    if (
+      !part ||
+      part.type !== "tool-request_secret" ||
+      part.state !== "approval-requested"
+    ) {
+      throw new Error("That request is no longer waiting for a credential.")
+    }
+    const input = part.input ?? {}
+    const name = String(input.name ?? "")
+    const origin = httpsOrigin(String(input.origin ?? ""))
+    const scheme =
+      (["bearer", "header", "basic"] as const).find(
+        (s) => s === input.scheme
+      ) ?? "bearer"
+    if (!validSecretName(name) || !origin) {
+      throw new Error(
+        "The bot asked for this with an invalid name or a non-HTTPS origin, so it cannot be saved."
+      )
+    }
+    const clean = value.trim()
+    if (!clean) throw new Error("Enter a value.")
+    this
+      .sql`INSERT INTO bot_secrets (name, origin, scheme, header, purpose, value, created_at)
+      VALUES (${name}, ${origin}, ${scheme}, ${String(input.header ?? "Authorization")}, ${String(input.purpose ?? "")}, ${clean}, ${Date.now()})
+      ON CONFLICT(name) DO UPDATE SET origin = excluded.origin, scheme = excluded.scheme,
+        header = excluded.header, purpose = excluded.purpose, value = excluded.value,
+        created_at = excluded.created_at`
+  }
+
+  @callable()
+  async getSecrets(): Promise<SecretMeta[]> {
+    return this.listSecretMeta()
+  }
+
+  @callable()
+  async deleteSecret(name: string) {
+    this.sql`DELETE FROM bot_secrets WHERE name = ${name}`
+  }
+
+  /** Called by the ask_user card, just before it approves the call. */
+  @callable()
+  async answerChoice(toolCallId: string, option: string) {
+    const part = this.messages
+      .flatMap((m) => m.parts)
+      .find((p) => (p as { toolCallId?: string }).toolCallId === toolCallId) as
+      | { type: string; state?: string; input?: { options?: unknown } }
+      | undefined
+    if (part?.type !== "tool-ask_user" || part.state !== "approval-requested") {
+      throw new Error("That question is no longer waiting for an answer.")
+    }
+    const options = Array.isArray(part.input?.options)
+      ? part.input.options.map(String)
+      : []
+    if (!options.includes(option))
+      throw new Error("That is not one of the options.")
+    this.ctx.storage.kv.put(`choice:${toolCallId}`, option)
+  }
+
+  private hasPendingApproval() {
+    return this.messages.some(
+      (m) => m.role === "assistant" && m.parts.some((p) => pendingApprovalId(p))
+    )
   }
 
   // ── Messages that do not come from the human ────────────────────────
@@ -1998,12 +2988,19 @@ export class BotAgent extends Think<Env, BotState> {
   private async submitAs(
     origin: MessageOrigin,
     text: string,
-    options: { background?: boolean; key?: string } = {}
+    options: {
+      background?: boolean
+      key?: string
+      hops?: number
+      routine?: MessageMeta["routine"]
+    } = {}
   ) {
     const metadata: MessageMeta = {
       origin,
       at: Date.now(),
       ...(options.background ? { background: true } : {}),
+      ...(options.hops ? { hops: options.hops } : {}),
+      ...(options.routine ? { routine: options.routine } : {}),
     }
     await this.runTurn({
       mode: "submit",
@@ -2018,11 +3015,92 @@ export class BotAgent extends Think<Env, BotState> {
   }
 
   /** Durable Object RPC from the UserHub: another bot is talking to this one. */
-  async receiveBotMessage(origin: MessageOrigin, text: string) {
+  async receiveBotMessage(
+    origin: MessageOrigin,
+    text: string,
+    delivery: { key?: string; hops?: number; files?: BotAttachment[] } = {}
+  ): Promise<string[]> {
+    const saved = await this.saveAttachments(origin.name, delivery)
+    const listed = saved.length
+      ? `\n\nAttached files, copied into your workspace:\n${saved.map((p) => `- ${p}`).join("\n")}`
+      : ""
     await this.submitAs(
       origin,
-      `[Message from the ${origin.name} bot]\n${text}`
+      `[Message from the ${origin.name} bot]\n${text}${listed}`,
+      { key: delivery.key, hops: delivery.hops }
     )
+    return saved
+  }
+
+  /**
+   * Read the sender's files for message_bot. All or nothing: a missing or
+   * oversized file fails the send rather than delivering half of it.
+   */
+  private async readAttachments(
+    paths: string[]
+  ): Promise<{ files: BotAttachment[] } | { error: string }> {
+    const files: BotAttachment[] = []
+    let total = 0
+    for (const raw of paths) {
+      const path = raw.startsWith("/") ? raw : `${WORKSPACE_ROOT}/${raw}`
+      if (
+        !path.startsWith(`${WORKSPACE_ROOT}/`) ||
+        path.split("/").includes("..")
+      ) {
+        return { error: `${raw} is not a file in your /workspace.` }
+      }
+      const stat = await this.workspace.fs.stat(path).catch(() => null)
+      if (!stat?.isFile)
+        return { error: `${raw} does not exist or is a folder.` }
+      total += stat.size
+      if (total > MAX_BOT_FILE_BYTES) {
+        return {
+          error: `Attachments are limited to ${MAX_BOT_FILE_BYTES / 1024 / 1024} MB in total. Send fewer or smaller files.`,
+        }
+      }
+      const stream = await this.workspace.fs.readFile(path)
+      const bytes = new Uint8Array(await new Response(stream).arrayBuffer())
+      files.push({ name: path.slice(path.lastIndexOf("/") + 1), bytes })
+    }
+    return { files }
+  }
+
+  /** Save another bot's attachments under /workspace/inbox/bots/<sender>/. */
+  private async saveAttachments(
+    sender: string,
+    delivery: { key?: string; files?: BotAttachment[] }
+  ): Promise<string[]> {
+    if (!delivery.files?.length) return []
+    // Derived from the delivery key, so a re-delivered message rewrites the
+    // same files instead of making copies.
+    const digest = await crypto.subtle.digest(
+      "SHA-1",
+      new TextEncoder().encode(delivery.key ?? crypto.randomUUID())
+    )
+    const id = [...new Uint8Array(digest)]
+      .slice(0, 4)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+    const folder = `inbox/bots/${slugify(sender, 40)}/${new Date().toISOString().slice(0, 10)}-${id}`
+    const used = new Set<string>()
+    const saved: string[] = []
+    for (const file of delivery.files) {
+      const dot = file.name.lastIndexOf(".")
+      const stem = slugify(dot > 0 ? file.name.slice(0, dot) : file.name, 60)
+      const ext =
+        dot > 0
+          ? file.name
+              .slice(dot + 1)
+              .replace(/[^a-zA-Z0-9]/g, "")
+              .slice(0, 10)
+          : ""
+      let name = ext ? `${stem}.${ext}` : stem
+      for (let n = 2; used.has(name); n++)
+        name = ext ? `${stem}-${n}.${ext}` : `${stem}-${n}`
+      used.add(name)
+      saved.push(await this.saveFile(`${folder}/${name}`, file.bytes))
+    }
+    return saved
   }
 
   /** Schedule callback. */
@@ -2033,6 +3111,54 @@ export class BotAgent extends Think<Env, BotState> {
         routines: this.state.routines.filter((r) => r.id !== payload.id),
       })
     }
+    await this.startRoutineRun(payload, 1)
+  }
+
+  /** Schedule callback: the one retry after a run failed before doing anything. */
+  async retryRoutine(payload: RoutinePayload) {
+    // A recurring routine deleted since the failure stays deleted.
+    if (
+      payload.kind === "cron" &&
+      !this.state.routines.some((r) => r.id === payload.id)
+    ) {
+      return
+    }
+    await this.startRoutineRun(payload, 2)
+  }
+
+  private async startRoutineRun(payload: RoutinePayload, attempt: number) {
+    const now = Date.now()
+    const busy = this.sql<{ id: string }>`SELECT id FROM routine_runs
+      WHERE routine_id = ${payload.id} AND status = 'running'
+        AND started_at > ${now - ROUTINE_OVERLAP_MS} LIMIT 1`
+    const runId = crypto.randomUUID()
+    if (busy.length) {
+      // Two copies of one routine would report the same things twice.
+      this
+        .sql`INSERT INTO routine_runs (id, routine_id, name, started_at, finished_at, status, attempt, note)
+        VALUES (${runId}, ${payload.id}, ${payload.name}, ${now}, ${now}, 'skipped', ${attempt},
+                ${"The previous run was still going."})`
+      this.trimRoutineRuns()
+      return
+    }
+    let changeNote = ""
+    if (payload.watch) {
+      const check = await this.checkWatch(payload.id, payload.watch)
+      if (check.status !== "changed") {
+        // No model call: record why, and stop here.
+        this
+          .sql`INSERT INTO routine_runs (id, routine_id, name, started_at, finished_at, status, attempt, note)
+          VALUES (${runId}, ${payload.id}, ${payload.name}, ${now}, ${Date.now()},
+                  ${check.status === "failed" ? "failed" : "quiet"}, ${attempt}, ${check.note})`
+        this.trimRoutineRuns()
+        return
+      }
+      changeNote = check.note
+    }
+    this
+      .sql`INSERT INTO routine_runs (id, routine_id, name, started_at, status, attempt)
+      VALUES (${runId}, ${payload.id}, ${payload.name}, ${now}, 'running', ${attempt})`
+    this.trimRoutineRuns()
     await this.submitAs(
       { kind: "routine", name: payload.name },
       routinePrompt({
@@ -2042,9 +3168,232 @@ export class BotAgent extends Think<Env, BotState> {
         onlyNew: payload.onlyNew === true,
         reported: payload.onlyNew ? this.reportedFor(payload.id) : [],
         timeZone: this.state.proactive.timezone,
-      }),
-      { background: true }
+      }) + changeNote,
+      {
+        background: true,
+        // One submission per routine, attempt and minute: an alarm that
+        // fires twice for the same slot does not start a second run.
+        key: `routine:${payload.id}:${attempt}:${Math.floor(now / 60_000)}`,
+        routine: { id: payload.id, runId, attempt },
+      }
     )
+  }
+
+  /**
+   * Fetch or run a routine's watch and compare it with last time. Costs no
+   * model call, so a routine can check often and only wake the model when
+   * something actually changed.
+   */
+  private async checkWatch(
+    routineId: string,
+    watch: RoutineWatch
+  ): Promise<{
+    status: "baseline" | "unchanged" | "changed" | "failed"
+    note: string
+  }> {
+    let output: string
+    try {
+      output = await this.readWatch(watch)
+    } catch (err) {
+      return {
+        status: "failed",
+        note: `Watch check failed: ${clip(err instanceof Error ? err.message : String(err), 200)}`,
+      }
+    }
+    const normalized = output.replace(/\s+/g, " ").trim()
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(normalized)
+    )
+    const fingerprint = [...new Uint8Array(digest)]
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+    const previous = this.sql<{
+      fingerprint: string
+      sample: string
+    }>`SELECT fingerprint, sample
+      FROM routine_watch WHERE routine_id = ${routineId}`[0]
+    this
+      .sql`INSERT INTO routine_watch (routine_id, fingerprint, sample, checked_at)
+      VALUES (${routineId}, ${fingerprint}, ${clip(output, WATCH_SAMPLE_CHARS)}, ${Date.now()})
+      ON CONFLICT(routine_id) DO UPDATE SET fingerprint = excluded.fingerprint,
+        sample = excluded.sample, checked_at = excluded.checked_at`
+    if (!previous)
+      return { status: "baseline", note: "First check: saved as the baseline." }
+    if (previous.fingerprint === fingerprint)
+      return { status: "unchanged", note: "No change since the last check." }
+    const what = "url" in watch ? watch.url : `\`${watch.command}\``
+    return {
+      status: "changed",
+      note: `\n\nThis run was started because ${what} changed since the last check.\nBefore:\n${previous.sample}\n\nNow:\n${clip(output, WATCH_SAMPLE_CHARS)}`,
+    }
+  }
+
+  private async readWatch(watch: RoutineWatch): Promise<string> {
+    if ("url" in watch) {
+      const url = new URL(watch.url)
+      if (url.protocol !== "https:" && url.protocol !== "http:")
+        throw new Error("Only http(s) URLs can be watched.")
+      const response = await fetch(url, {
+        headers: { "user-agent": "bdots-watch/1" },
+        signal: AbortSignal.timeout(20_000),
+      })
+      if (!response.ok)
+        throw new Error(`${url.host} answered ${response.status}.`)
+      const text = await response.text()
+      // Pages carry noise (scripts, styles, tags); compare what a reader sees.
+      return /html/i.test(response.headers.get("content-type") ?? "")
+        ? text
+            .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ")
+            .replace(/<[^>]+>/g, " ")
+        : text
+    }
+    const run = this.#shell.then(async () => {
+      const handle = await this.workspace.runtime.exec(watch.command, {
+        encoding: "utf8",
+        cwd: "/workspace",
+      })
+      try {
+        const { stdout, stderr, exitCode } = await handle.result()
+        if (exitCode !== 0)
+          throw new Error(`exit ${exitCode}: ${clip(stderr || stdout, 200)}`)
+        return stdout
+      } finally {
+        handle[Symbol.dispose]()
+      }
+    })
+    this.#shell = run.catch(() => undefined)
+    return run
+  }
+
+  private trimRoutineRuns() {
+    this.sql`DELETE FROM routine_runs WHERE id NOT IN
+      (SELECT id FROM routine_runs ORDER BY started_at DESC LIMIT 300)`
+  }
+
+  /** When the next scheduled run of a routine is due, in Unix ms. */
+  private nextRoutineRun(routineId: string): number | null {
+    const next = this.getSchedules<RoutinePayload>().find(
+      (s) => s.callback === "runRoutine" && s.payload.id === routineId
+    )
+    return next ? next.time * 1000 : null
+  }
+
+  /** Record how a routine run ended; retry or tell the user if it failed. */
+  private async finishRoutineRun(
+    run: NonNullable<MessageMeta["routine"]>,
+    result: ChatResponseResult,
+    outcome: { waiting: boolean; quiet: boolean }
+  ) {
+    const row = this.sql<{ name: string; status: string }>`SELECT name, status
+      FROM routine_runs WHERE id = ${run.runId}`[0]
+    // Recovery can deliver the hook twice; only the first one counts.
+    if (!row || row.status !== "running") return
+    const now = Date.now()
+    if (result.status !== "error") {
+      const status = outcome.waiting
+        ? "waiting"
+        : result.status === "aborted"
+          ? "stopped"
+          : outcome.quiet
+            ? "quiet"
+            : "reported"
+      this.sql`UPDATE routine_runs SET status = ${status}, finished_at = ${now}
+        WHERE id = ${run.runId}`
+      return
+    }
+
+    const error = clip(result.error?.trim() || "The model call failed.", 300)
+    const didWork = result.message.parts.some(
+      (p) => p.type.startsWith("tool-") || p.type === "dynamic-tool"
+    )
+    const next = this.nextRoutineRun(run.id)
+    const nextIsSoon = next !== null && next - now < ROUTINE_RETRY_SKIP_MS
+    // Retry only a run that failed before touching anything, so a retry can
+    // never repeat a side effect.
+    if (run.attempt === 1 && !didWork && !nextIsSoon) {
+      const routine = this.state.routines.find((r) => r.id === run.id)
+      const payload: RoutinePayload = routine
+        ? {
+            id: routine.id,
+            name: routine.name,
+            prompt: routine.prompt,
+            kind: routine.kind,
+            ...(routine.onlyNew ? { onlyNew: true } : {}),
+            ...(routine.watch ? { watch: routine.watch } : {}),
+          }
+        : // A one-off routine is already gone from state; rebuild it from
+          // the run so the retry still has its instructions.
+          {
+            id: run.id,
+            name: row.name,
+            prompt: this.routinePromptOf(run.runId),
+            kind: "once",
+          }
+      if (payload.prompt) {
+        await this.schedule(ROUTINE_RETRY_DELAY_S, "retryRoutine", payload)
+        this
+          .sql`UPDATE routine_runs SET status = 'retrying', finished_at = ${now},
+          note = ${error} WHERE id = ${run.runId}`
+        return
+      }
+    }
+
+    this.sql`UPDATE routine_runs SET status = 'failed', finished_at = ${now},
+      note = ${error} WHERE id = ${run.runId}`
+    const when = next
+      ? ` It runs again ${new Date(next).toLocaleString("en-GB", {
+          timeZone: this.state.proactive.timezone,
+          dateStyle: "medium",
+          timeStyle: "short",
+        })}.`
+      : ""
+    const notice = `Routine **${row.name}** failed: ${error}${when}`
+    await this.addMessages([
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        parts: [{ type: "text", text: notice }],
+        metadata: {
+          origin: { kind: "routine", name: row.name },
+          at: now,
+        } satisfies MessageMeta,
+      },
+    ])
+    await this.report({
+      status: "idle",
+      unread: true,
+      preview: clip(notice.replace(/\*\*/g, ""), MAX_PREVIEW),
+    })
+    await this.notify(`${row.name} failed: ${error}`)
+  }
+
+  /** The instructions a routine run was started with, from its trigger message. */
+  private routinePromptOf(runId: string): string {
+    const trigger = this.messages.find(
+      (m) => m.role === "user" && metaOf(m).routine?.runId === runId
+    )
+    if (!trigger) return ""
+    const text = textOf(trigger)
+    // routinePrompt() puts the routine's own prompt after its header line.
+    return text
+      .split("\n")
+      .slice(1)
+      .join("\n")
+      .split("\n\nRoutine id:")[0]
+      .trim()
+  }
+
+  /** Recent runs, newest first, for the routine's history. */
+  @callable()
+  async getRoutineRuns(routineId?: string): Promise<RoutineRun[]> {
+    const rows = routineId
+      ? this
+          .sql<RoutineRunRow>`SELECT * FROM routine_runs WHERE routine_id = ${routineId}
+          ORDER BY started_at DESC LIMIT 50`
+      : this
+          .sql<RoutineRunRow>`SELECT * FROM routine_runs ORDER BY started_at DESC LIMIT 50`
+    return rows.map(toRoutineRun)
   }
 
   /** What earlier runs of this routine told the user (see routinePrompt). */
@@ -2327,6 +3676,7 @@ export class BotAgent extends Think<Env, BotState> {
       prompt: routine.prompt,
       kind: routine.kind,
       ...(routine.onlyNew ? { onlyNew: true } : {}),
+      ...(routine.watch ? { watch: routine.watch } : {}),
     }
     const when = routine.kind === "cron" ? routine.when : new Date(routine.when)
     if (when instanceof Date && Number.isNaN(when.getTime())) {
@@ -2336,11 +3686,12 @@ export class BotAgent extends Think<Env, BotState> {
   }
 
   private async cancelRoutineSchedule(id: string) {
-    const schedules = this.getSchedules<RoutinePayload>()
-    const match = schedules.find(
-      (s) => s.callback === "runRoutine" && s.payload.id === id
+    const matches = this.getSchedules<RoutinePayload>().filter(
+      (s) =>
+        (s.callback === "runRoutine" || s.callback === "retryRoutine") &&
+        s.payload.id === id
     )
-    if (match) await this.cancelSchedule(match.id)
+    for (const match of matches) await this.cancelSchedule(match.id)
   }
 
   private async addRoutine(input: Omit<Routine, "id">): Promise<Routine> {
@@ -2355,7 +3706,9 @@ export class BotAgent extends Think<Env, BotState> {
 
   private async updateRoutine(
     id: string,
-    patch: Partial<Omit<Routine, "id">>
+    patch: Partial<Omit<Routine, "id" | "watch">> & {
+      watch?: Routine["watch"] | null
+    }
   ): Promise<Routine | null> {
     const current = this.state.routines.find((r) => r.id === id)
     if (!current) return null
@@ -2369,6 +3722,12 @@ export class BotAgent extends Think<Env, BotState> {
     if (patch.onlyNew !== undefined) {
       if (patch.onlyNew) next.onlyNew = true
       else delete next.onlyNew
+    }
+    if (patch.watch !== undefined) {
+      if (patch.watch) next.watch = patch.watch
+      else delete next.watch
+      // A new watch starts from a fresh baseline.
+      this.sql`DELETE FROM routine_watch WHERE routine_id = ${id}`
     }
     const stale = this.getSchedules<RoutinePayload>()
       .filter((s) => s.callback === "runRoutine" && s.payload.id === id)
@@ -2385,6 +3744,7 @@ export class BotAgent extends Think<Env, BotState> {
 
   private async removeRoutine(id: string) {
     await this.cancelRoutineSchedule(id)
+    this.sql`DELETE FROM routine_watch WHERE routine_id = ${id}`
     const had = this.state.routines.some((r) => r.id === id)
     this.setState({
       ...this.state,
@@ -2548,7 +3908,42 @@ export class BotAgent extends Think<Env, BotState> {
 
   @callable()
   async setMemory(content: string) {
+    if (content.length > MAX_MEMORY_CHARS) {
+      throw new Error(`Memory is limited to ${MAX_MEMORY_CHARS} characters.`)
+    }
     await this.session.replaceContextBlock("memory", content)
+    this.logMemory("user", content)
+  }
+
+  @callable()
+  async getMemoryRevisions() {
+    return this.sql<{
+      id: number
+      at: number
+      source: string
+    }>`SELECT id, at, source
+      FROM memory_revisions ORDER BY id DESC LIMIT 20`
+  }
+
+  @callable()
+  async restoreMemory(revisionId: number) {
+    const row = this.sql<{
+      content: string
+    }>`SELECT content FROM memory_revisions WHERE id = ${revisionId}`[0]
+    if (!row) return
+    await this.session.replaceContextBlock("memory", row.content)
+    this.logMemory("restored", row.content)
+  }
+
+  private logMemory(source: string, content: string) {
+    const last = this.sql<{
+      content: string
+    }>`SELECT content FROM memory_revisions ORDER BY id DESC LIMIT 1`[0]
+    if (last?.content === content) return
+    this
+      .sql`INSERT INTO memory_revisions (at, source, content) VALUES (${Date.now()}, ${source}, ${content})`
+    this
+      .sql`DELETE FROM memory_revisions WHERE id <= (SELECT MAX(id) FROM memory_revisions) - 50`
   }
 
   /** Live View URLs for the bot's browser tabs. Valid for about 5 minutes. */

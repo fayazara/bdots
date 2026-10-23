@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useMemo } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import {
   ClientOnly,
   Link,
@@ -226,6 +226,13 @@ function LiveBot({
   // Opening a thread clears its unread dot, including for replies that land
   // while it is open.
   const unread = hub.state.bots.find((b) => b.id === botId)?.unread
+  // Where the "New" divider goes: the newest reply, if it was unread when
+  // the thread opened. Kept for the visit, so reading it does not move it.
+  const [unreadFrom] = useState(() =>
+    unread
+      ? chat.messages.findLast((m) => m.role === "assistant")?.id
+      : undefined
+  )
   const { markRead } = hub
   useEffect(() => {
     if (unread) markRead(botId)
@@ -253,6 +260,18 @@ function LiveBot({
     [chat]
   )
 
+  const onProvideSecret = useCallback(
+    (toolCallId: string, value: string) =>
+      agent.stub.provideSecret(toolCallId, value),
+    [agent]
+  )
+
+  const onAnswerChoice = useCallback(
+    (toolCallId: string, option: string) =>
+      agent.stub.answerChoice(toolCallId, option),
+    [agent]
+  )
+
   const onAttach = useCallback(
     async (file: File) => {
       const bytes = new Uint8Array(await file.arrayBuffer())
@@ -274,6 +293,9 @@ function LiveBot({
         getLiveView={getLiveView}
         readFile={readFile}
         onApproval={onApproval}
+        onProvideSecret={onProvideSecret}
+        onAnswerChoice={onAnswerChoice}
+        unreadFrom={unreadFrom}
       />
       {chat.error ? (
         <p

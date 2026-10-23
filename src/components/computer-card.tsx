@@ -84,13 +84,16 @@ export function LiveViewFrame({
   )
 }
 
-type CardStatus = "working" | "action_needed" | "done" | "failed"
+type CardStatus = "working" | "action_needed" | "done" | "skipped" | "failed"
 
-function cardStatus(calls: ToolCall[]): CardStatus {
+/** `carriedOn`: the reply goes on after this card, so a failure was not the end. */
+function cardStatus(calls: ToolCall[], carriedOn: boolean): CardStatus {
   if (calls.some((c) => c.state === "waiting")) return "action_needed"
   if (calls.some((c) => c.state === "running")) return "working"
   const last = calls.at(-1)
-  if (last?.state === "error" || last?.state === "denied") return "failed"
+  if (last?.state === "error" || last?.state === "denied") {
+    return carriedOn ? "skipped" : "failed"
+  }
   return "done"
 }
 
@@ -113,6 +116,8 @@ function describe(status: CardStatus, steps: number, tab?: LiveTab) {
     case "working":
     case "action_needed":
       return where ? `Working on ${where}` : "Opening the browser…"
+    case "skipped":
+      return `A browser step failed, so the bot tried another way · ${count}`
     case "failed":
       return `The last browser step failed · ${count}`
     case "done":
@@ -132,6 +137,8 @@ function StatusChip({ status }: { status: CardStatus }) {
       )
     case "action_needed":
       return <Badge variant="orange">Action needed</Badge>
+    case "skipped":
+      return <Badge variant="neutral">Skipped</Badge>
     case "failed":
       return <Badge variant="red">Stopped</Badge>
     case "done":
@@ -147,6 +154,8 @@ interface ComputerCardProps {
   calls: ToolCall[]
   /** Only the most recent card in a thread shows the live browser. */
   latest: boolean
+  /** More of the reply follows this card. */
+  carriedOn?: boolean
   getLiveView?: GetLiveView
   onApproval?: (approvalId: string, approved: boolean, reason?: string) => void
 }
@@ -155,13 +164,14 @@ interface ComputerCardProps {
 export function ComputerCard({
   calls,
   latest,
+  carriedOn = false,
   getLiveView,
   onApproval,
 }: ComputerCardProps) {
-  const status = cardStatus(calls)
+  const status = cardStatus(calls, carriedOn)
   const handoff = calls.findLast((c) => c.name === "request_handoff")
   const waiting = calls.find((c) => c.state === "waiting")
-  const showPreview = latest && status !== "failed"
+  const showPreview = latest && status !== "failed" && status !== "skipped"
   const { tabs, refresh } = useLiveView(getLiveView, showPreview)
   const [takingOver, setTakingOver] = useState(false)
   // The newest tab is the one the bot is working in.

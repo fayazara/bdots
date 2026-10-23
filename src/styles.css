@@ -25,6 +25,19 @@
     -webkit-tap-highlight-color: transparent;
   }
 
+  /* Tailwind v4's preflight gives buttons the default arrow; clickable
+     things here should say so. Disabled ones keep the arrow. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="option"],
+  [role="menuitem"],
+  [role="tab"],
+  select:not(:disabled),
+  summary,
+  label[for] {
+    cursor: pointer;
+  }
+
   html {
     font-family:
       system-ui,
@@ -83,8 +96,8 @@
  * Layout grid. Every column (sidebar, chat, side panel) starts with a
  * --header-h row whose --control-size controls sit --inset from each edge
  * on all four sides, so the three top rows share one centre line. The
- * composer row and the sidebar footer are both --footer-h tall and share
- * the bottom centre line.
+ * composer row is --footer-h tall; the sidebar footer is a --header-h row
+ * like the search bar above it.
  */
 :root {
   --header-h: 56px;
@@ -765,5 +778,18 @@
   .pressable:active,
   .icon-btn:active {
     transform: none;
+  }
+}
+
+/*
+ * Kumo's Tooltip adds `cursor-default` to whatever it wraps, so every icon
+ * button with a tooltip lost its pointer. An enabled button or link is
+ * clickable whatever wraps it; this outranks the utility (element +
+ * class beats class alone in the same layer).
+ */
+@layer utilities {
+  button.cursor-default:not(:disabled),
+  a[href].cursor-default {
+    cursor: pointer;
   }
 }

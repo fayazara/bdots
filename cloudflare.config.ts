@@ -65,7 +65,7 @@ export default defineConfig({
       // on a failing approach instead of switching or asking. For example
       // "anthropic/claude-sonnet-5-5" or "openai/<model>" (AI Gateway with
       // Unified Billing or stored provider keys).
-      MODEL: bindings.text("@cf/deepseek-ai/deepseek-v4-flash-0731"),
+      MODEL: bindings.text("@cf/deepseek-ai/deepseek-v4.1-flash-1017"),
       // Optional model for background turns (routines, check-ins, email).
       // Empty uses MODEL. Lets a cheap model run scheduled work while chat
       // uses a strong one.

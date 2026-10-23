@@ -58,6 +58,12 @@ export interface Connection {
   /** Present while the server is waiting for the user to sign in. */
   authUrl?: string
   error?: string
+  /** The last tool call through this connection that failed, if the latest did. */
+  lastFailure?: {
+    at: number
+    message: string
+    kind: "auth" | "unreachable" | "tool"
+  }
 }
 
 /** A tool from a connection, as the UserHub describes it to bots. */
@@ -73,7 +79,7 @@ export interface AppTool {
 }
 
 export interface AppCatalog {
-  apps: Pick<Connection, "name" | "status" | "tools">[]
+  apps: Pick<Connection, "id" | "name" | "status" | "tools" | "error">[]
   tools: AppTool[]
 }
 
@@ -131,7 +137,12 @@ export interface Routine {
   kind: "cron" | "once"
   /** Only report what earlier runs did not, and stay quiet otherwise. */
   onlyNew?: boolean
+  /** Check this first and only run when its output changed. */
+  watch?: RoutineWatch
 }
+
+/** A cheap check a routine runs before waking the model. */
+export type RoutineWatch = { url: string } | { command: string }
 
 /** How a bot works on its own between conversations. */
 export interface ProactiveSettings {
@@ -264,6 +275,31 @@ export interface MessageMeta {
   background?: boolean
   /** On a finished reply: how long the bot worked on it. */
   durationMs?: number
+  /** Bot-to-bot messages: how many bots this chain has passed through. */
+  hops?: number
+  /** On the trigger of a routine run: which run of which routine it is. */
+  routine?: { id: string; runId: string; attempt: number }
+}
+
+/** One run of a routine, newest first in `getRoutineRuns()`. */
+export interface RoutineRun {
+  id: string
+  routineId: string
+  name: string
+  /** Unix ms. */
+  startedAt: number
+  finishedAt: number | null
+  status:
+    | "running"
+    | "reported"
+    | "quiet"
+    | "waiting"
+    | "failed"
+    | "retrying"
+    | "skipped"
+    | "stopped"
+  attempt: number
+  note: string
 }
 
 /** A background turn ends with exactly this when there is nothing to say. */
@@ -297,4 +333,23 @@ export const NEW_BOT_NAME = "New bot"
 /** Durable Object instance name for a bot. */
 export function botInstanceName(userId: string, botId: string) {
   return `${userId}:${botId}`
+}
+
+export type SecretScheme = "bearer" | "header" | "basic"
+
+/** A credential a bot saved with request_secret. The value never leaves the bot. */
+export interface SecretMeta {
+  name: string
+  origin: string
+  scheme: SecretScheme
+  /** For "header": the header to set. "bearer" and "basic" use Authorization. */
+  header: string
+  purpose: string
+  createdAt: number
+}
+
+/** A file one bot sends another with message_bot. */
+export interface BotAttachment {
+  name: string
+  bytes: Uint8Array
 }

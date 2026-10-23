@@ -7,6 +7,18 @@
       "skillPath": "skills/emil-design-eng/SKILL.md",
       "computedHash": "51f2537e04d15911b41d78e2de24c36a0e26d41beae15e82a954fe5496a5eda9"
     },
+    "hugeicons": {
+      "source": "hugeicons/hugeicons",
+      "sourceType": "github",
+      "skillPath": "skills/hugeicons/SKILL.md",
+      "computedHash": "6de3ca2b27140a1905c6eb8ff52de7d40df74004b936afc7c16c7a13ec33b03c"
+    },
+    "hugeicons-migrate": {
+      "source": "hugeicons/hugeicons",
+      "sourceType": "github",
+      "skillPath": "skills/hugeicons-migrate/SKILL.md",
+      "computedHash": "4b042988222a9b48a03e00fed856474142f3a2c736099ca89b380cac0e89aee2"
+    },
     "make-interfaces-feel-better": {
       "source": "jakubkrehel/make-interfaces-feel-better",
       "sourceType": "github",
