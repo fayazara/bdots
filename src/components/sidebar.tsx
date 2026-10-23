@@ -232,10 +232,10 @@ export function Sidebar() {
         ) : null}
       </nav>
 
-      {/* Shares the composer's centre line; the avatar sits in a 48px slot so
-          it centres under the bot avatars above. */}
-      <div className="flex h-(--footer-h) shrink-0 items-center gap-3 pr-(--inset) pl-5">
-        <span className="flex w-12 shrink-0 justify-center">
+      {/* Same row as the search bar at the top: --header-h tall, --inset
+          from the edges, the avatar where the search icon sits. */}
+      <div className="col-header pl-4">
+        <span className="flex shrink-0">
           {hub.viewer.avatarUrl ? (
             <img
               src={hub.viewer.avatarUrl}
