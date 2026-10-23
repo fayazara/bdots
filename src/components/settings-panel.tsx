@@ -30,8 +30,10 @@ import {
 import { useBot } from "@/lib/bot-context"
 import { connectionStatus } from "@/lib/connection-status"
 import { useHub } from "@/lib/hub-context"
+import type { MemoryRevision } from "@/lib/hub-context"
 import { ACTION_CLASSES, CHECK_IN_HOURS, DEFAULT_PROACTIVE } from "@/lib/types"
 import type {
+  SecretMeta,
   ActionClass,
   BotInbound,
   OpenItem,
@@ -286,8 +288,8 @@ function OpenItems() {
         resolved.length > 0 ? (
           <details>
             <summary className="cursor-pointer">
-              Things it's waiting on or following up, checked on every
-              check-in. {resolved.length} closed recently.
+              Things it's waiting on or following up, checked on every check-in.{" "}
+              {resolved.length} closed recently.
             </summary>
             <ul className="mt-2 space-y-1">
               {resolved.map((item) => (
@@ -328,7 +330,11 @@ function OpenItems() {
                 item.title
               )
             }
-            detail={item.note ? <span className="line-clamp-2">{item.note}</span> : undefined}
+            detail={
+              item.note ? (
+                <span className="line-clamp-2">{item.note}</span>
+              ) : undefined
+            }
           >
             <RowAction
               label={`Stop tracking ${item.title}`}
@@ -427,7 +433,12 @@ function Routines() {
             key={routine.id}
             routine={routine}
             onDelete={
-              agent ? () => void agent.stub.deleteRoutine(routine.id) : undefined
+              agent
+                ? () => void agent.stub.deleteRoutine(routine.id)
+                : undefined
+            }
+            loadRuns={
+              agent ? () => agent.stub.getRoutineRuns(routine.id) : undefined
             }
           />
         ))
@@ -560,42 +571,100 @@ function Reach() {
   )
 }
 
+interface MemorySource {
+  load: () => Promise<{ content: string; revisions: MemoryRevision[] }>
+  save: (content: string) => Promise<void>
+  restore: (revisionId: number) => Promise<void>
+}
+
 function Memory() {
   const { agent } = useBot()
+  const hub = useHub()
+  const own: MemorySource | null = agent
+    ? {
+        load: async () => ({
+          content: await agent.stub.getMemory(),
+          revisions: await agent.stub.getMemoryRevisions(),
+        }),
+        save: (content) => agent.stub.setMemory(content),
+        restore: (id) => agent.stub.restoreMemory(id),
+      }
+    : null
+  const shared = hub.sharedMemory
+  return (
+    <div className="space-y-6">
+      <MemoryEditor
+        title="Memory"
+        hint="What it has learned about you and how you like things done. It keeps this up to date itself; you can correct it."
+        source={own}
+        sourceKey={agent ? "bot" : null}
+      />
+      <MemoryEditor
+        title="Shared with all your bots"
+        hint="Facts every one of your bots reads: your name, time zone, team, standing preferences."
+        source={
+          shared
+            ? { load: shared.get, save: shared.set, restore: shared.restore }
+            : null
+        }
+        sourceKey={shared ? "shared" : null}
+      />
+    </div>
+  )
+}
+
+function MemoryEditor({
+  title,
+  hint,
+  source,
+  sourceKey,
+}: {
+  title: string
+  hint: string
+  source: MemorySource | null
+  /** Changes when the source becomes available, to trigger a load. */
+  sourceKey: string | null
+}) {
   const [saved, setSaved] = useState<string | null>(null)
   const [draft, setDraft] = useState("")
+  const [revisions, setRevisions] = useState<MemoryRevision[]>([])
   const [saving, setSaving] = useState(false)
+  const hydrated = useHydrated()
+
+  async function reload() {
+    if (!source) return
+    const { content, revisions } = await source.load()
+    setSaved(content)
+    setDraft(content)
+    setRevisions(revisions)
+  }
 
   useEffect(() => {
-    if (!agent) return
-    let cancelled = false
-    void agent.stub.getMemory().then((content) => {
-      if (cancelled) return
-      setSaved(content)
-      setDraft(content)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [agent])
+    void reload()
+    // `source` is rebuilt each render; `sourceKey` says when it changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceKey])
 
   async function save() {
-    if (!agent) return
+    if (!source) return
     setSaving(true)
     try {
-      await agent.stub.setMemory(draft)
-      setSaved(draft)
+      await source.save(draft)
+      await reload()
     } finally {
       setSaving(false)
     }
   }
 
+  async function restore(id: number) {
+    if (!source) return
+    await source.restore(id)
+    await reload()
+  }
+
   return (
     <div className="space-y-2">
-      <Group
-        title="Memory"
-        hint="What it has learned about you and how you like things done. It keeps this up to date itself; you can correct it."
-      >
+      <Group title={title} hint={hint}>
         {saved === null ? (
           <EmptyRow>
             <Loader size="sm" />
@@ -603,7 +672,7 @@ function Memory() {
         ) : (
           <li className="px-4 py-3">
             <textarea
-              aria-label="Memory"
+              aria-label={title}
               placeholder="Nothing remembered yet."
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -611,6 +680,36 @@ function Memory() {
             />
           </li>
         )}
+        {revisions.length > 1 ? (
+          <li className="px-4 py-3">
+            <details>
+              <summary className="cursor-pointer text-sm text-kumo-subtle">
+                History · {revisions.length} versions
+              </summary>
+              <ul className="mt-2 space-y-1">
+                {revisions.slice(1).map((r) => (
+                  <li
+                    key={r.id}
+                    className="flex items-center justify-between gap-3 text-sm"
+                  >
+                    <span className="text-kumo-subtle tabular-nums">
+                      {hydrated ? new Date(r.at).toLocaleString() : ""} ·{" "}
+                      {r.source}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="rounded-full"
+                      onClick={() => void restore(r.id)}
+                    >
+                      Restore
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          </li>
+        ) : null}
       </Group>
       <SaveBar
         dirty={saved !== null && draft !== saved}
@@ -620,6 +719,59 @@ function Memory() {
       />
     </div>
   )
+}
+
+/** Credentials the user typed into request_secret cards. Values never load here. */
+function Credentials() {
+  const { agent } = useBot()
+  const [secrets, setSecrets] = useState<SecretMeta[] | null>(null)
+
+  useEffect(() => {
+    if (!agent) return
+    void agent.stub.getSecrets().then(setSecrets)
+  }, [agent])
+
+  if (!secrets?.length) return null
+  return (
+    <Group
+      title="Saved credentials"
+      hint="Keys and tokens you gave this bot. Each is only sent to its own site, and the bot never sees the value."
+    >
+      {secrets.map((secret) => (
+        <Row
+          key={secret.name}
+          label={secret.name}
+          detail={`${hostOf(secret.origin)}${secret.purpose ? ` · ${secret.purpose}` : ""}`}
+        >
+          <RowAction
+            label={`Delete ${secret.name}`}
+            danger
+            onClick={() => {
+              if (!agent) return
+              void agent.stub
+                .deleteSecret(secret.name)
+                .then(() =>
+                  setSecrets(
+                    (list) =>
+                      list?.filter((s) => s.name !== secret.name) ?? null
+                  )
+                )
+            }}
+          >
+            <TrashIcon size={16} />
+          </RowAction>
+        </Row>
+      ))}
+    </Group>
+  )
+}
+
+function hostOf(origin: string) {
+  try {
+    return new URL(origin).host
+  } catch {
+    return origin
+  }
 }
 
 function DangerZone() {
@@ -659,8 +811,8 @@ function DangerZone() {
           Delete {state.name}?
         </Dialog.Title>
         <Dialog.Description className="text-sm text-pretty text-kumo-subtle">
-          Its chat history, memory, routines and every file on its computer
-          are deleted. This can't be undone.
+          Its chat history, memory, routines and every file on its computer are
+          deleted. This can't be undone.
         </Dialog.Description>
         <div className="flex justify-end gap-2">
           <Dialog.Close
@@ -696,6 +848,7 @@ export function SettingsPanel() {
       <Skills />
       <Reach />
       <Memory />
+      <Credentials />
       <DangerZone />
     </div>
   )

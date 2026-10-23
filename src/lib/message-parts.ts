@@ -22,6 +22,8 @@ export type Block =
   | { kind: "computer"; key: string; calls: ToolCall[] }
   | { kind: "steps"; key: string; calls: ToolCall[] }
   | { kind: "approval"; key: string; call: ToolCall }
+  | { kind: "choice"; key: string; call: ToolCall }
+  | { kind: "secret"; key: string; call: ToolCall }
   | { kind: "capture"; key: string; call: ToolCall; capture: Capture }
   | { kind: "routine"; key: string; routine: Routine; updated: boolean }
 
@@ -179,6 +181,42 @@ export function toBlocks(message: UIMessage): Block[] {
           kind: "event",
           key,
           label: `Learned a skill: ${String(call.input.name ?? "")}`,
+        })
+      }
+      return
+    }
+    if (call.name === "request_secret") {
+      const name = String(call.input.name ?? "credential")
+      if (call.state === "waiting") blocks.push({ kind: "secret", key, call })
+      else if (call.state === "done") {
+        const saved = (call.output as { saved?: boolean } | null)?.saved
+        blocks.push({
+          kind: "event",
+          key,
+          label: saved ? `Saved ${name}` : `${name} not provided`,
+        })
+      } else if (call.state !== "running") {
+        blocks.push({ kind: "event", key, label: `${name} not provided` })
+      }
+      return
+    }
+    if (call.name === "ask_user") {
+      const question = String(call.input.question ?? "")
+      if (call.state === "waiting") {
+        blocks.push({ kind: "choice", key, call })
+      } else if (call.state === "done") {
+        const answer = (call.output as { answer?: string | null } | null)
+          ?.answer
+        blocks.push({
+          kind: "event",
+          key,
+          label: answer ? `${question} · ${answer}` : question,
+        })
+      } else if (call.state !== "running") {
+        blocks.push({
+          kind: "event",
+          key,
+          label: `${question} · answered in chat`,
         })
       }
       return

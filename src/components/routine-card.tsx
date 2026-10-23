@@ -3,7 +3,7 @@ import { useHydrated } from "@tanstack/react-router"
 import { RowAction } from "@/components/group"
 import { ClockIcon, TrashIcon } from "@/components/icons"
 import { describeCron, nextRun, parseCron, runsBetween } from "@/lib/cron"
-import type { Routine } from "@/lib/types"
+import type { Routine, RoutineRun } from "@/lib/types"
 
 const WINDOW = 24 * 60 * 60_000
 
@@ -79,7 +79,10 @@ function Timeline({ runs, now }: { runs: number[]; now: number }) {
           />
         ))}
       </div>
-      <div aria-hidden="true" className="relative mt-1 h-4 text-[11px] text-kumo-subtle tabular-nums">
+      <div
+        aria-hidden="true"
+        className="relative mt-1 h-4 text-[11px] text-kumo-subtle tabular-nums"
+      >
         <span className="absolute left-0">Now</span>
         {marks.map((t) => (
           <span
@@ -96,13 +99,74 @@ function Timeline({ runs, now }: { runs: number[]; now: number }) {
 }
 
 /** One routine: when it runs, the next 24 hours at a glance, what it does. */
+const RUN_LABEL: Record<RoutineRun["status"], string> = {
+  running: "Running",
+  reported: "Reported",
+  quiet: "Nothing new",
+  waiting: "Needs you",
+  failed: "Failed",
+  retrying: "Failed, retrying",
+  skipped: "Skipped",
+  stopped: "Stopped",
+}
+
+/** The last few runs: when, and how each ended. */
+function RunHistory({ runs, now }: { runs: RoutineRun[]; now: number }) {
+  if (runs.length === 0) return null
+  return (
+    <ul className="space-y-1 text-xs tabular-nums">
+      {runs.slice(0, 5).map((run) => (
+        <li
+          key={run.id}
+          className="flex items-baseline gap-2"
+          title={run.note || undefined}
+        >
+          <span className="w-28 shrink-0 text-kumo-subtle">
+            {formatTime(run.startedAt, now)}
+          </span>
+          <span
+            className={
+              run.status === "failed" || run.status === "retrying"
+                ? "text-kumo-danger"
+                : run.status === "reported"
+                  ? "text-kumo-default"
+                  : "text-kumo-subtle"
+            }
+          >
+            {RUN_LABEL[run.status]}
+          </span>
+          {run.note && run.status !== "reported" ? (
+            <span className="truncate text-kumo-subtle">· {run.note}</span>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export function RoutineCard({
   routine,
   onDelete,
+  loadRuns,
 }: {
   routine: Routine
   onDelete?: () => void
+  /** Recent runs, newest first. Absent where history is not shown. */
+  loadRuns?: () => Promise<RoutineRun[]>
 }) {
+  const [history, setHistory] = useState<RoutineRun[]>([])
+  useEffect(() => {
+    if (!loadRuns) return
+    let cancelled = false
+    void loadRuns().then((runs) => {
+      if (!cancelled) setHistory(runs)
+    })
+    return () => {
+      cancelled = true
+    }
+    // Reload when the routine changes; loadRuns is rebuilt each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routine.id, routine.prompt, routine.when])
   const hydrated = useHydrated()
   const now = useNow()
   const [expanded, setExpanded] = useState(false)
@@ -144,6 +208,18 @@ export function RoutineCard({
                 Only new
               </span>
             ) : null}
+            {routine.watch ? (
+              <span
+                className="shrink-0 rounded-full bg-(--fill-hover) px-2 py-0.5 text-[11px] text-kumo-subtle"
+                title={
+                  "url" in routine.watch
+                    ? routine.watch.url
+                    : routine.watch.command
+                }
+              >
+                Watches for changes
+              </span>
+            ) : null}
           </div>
           <p className="mt-0.5 text-xs text-kumo-subtle tabular-nums">
             <span className="text-kumo-default">{schedule}</span>
@@ -170,7 +246,12 @@ export function RoutineCard({
       </div>
 
       <div className="mt-3 space-y-3 pl-10">
-        {hydrated ? <Timeline runs={runs} now={now} /> : <div className="h-[62px]" />}
+        {hydrated ? (
+          <Timeline runs={runs} now={now} />
+        ) : (
+          <div className="h-[62px]" />
+        )}
+        {hydrated ? <RunHistory runs={history} now={now} /> : null}
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}

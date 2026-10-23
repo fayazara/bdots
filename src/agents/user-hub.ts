@@ -11,6 +11,7 @@ import type {
   PushSubscriptionData,
 } from "@/lib/types"
 import type { BotAgent } from "./bot-agent"
+import { MAX_MEMORY_CHARS, appendFact } from "./memory"
 
 const READ_VERBS =
   /(^|[_\-.])(get|list|search|read|fetch|find|query|lookup|describe|view|show|count)([_\-.]|$)/i
@@ -50,6 +51,13 @@ export class UserHub extends Agent<Env, HubState> {
       endpoint TEXT PRIMARY KEY,
       data TEXT NOT NULL,
       created_at INTEGER NOT NULL
+    )`
+    // Memory every bot of this user reads, with its edit history.
+    this.sql`CREATE TABLE IF NOT EXISTS shared_memory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      content TEXT NOT NULL
     )`
     // After an MCP sign-in completes, send the user back to Connections.
     this.mcp.configureOAuthCallback({
@@ -309,6 +317,7 @@ export class UserHub extends Agent<Env, HubState> {
         headerNames: c.headerNames,
         status: server?.state ?? "failed",
         tools: tools.filter((t) => t.serverId === serverId(c.id)).length,
+        ...(c.lastFailure ? { lastFailure: c.lastFailure } : {}),
         ...(server?.auth_url ? { authUrl: server.auth_url } : {}),
         ...(server?.error
           ? { error: server.error }
@@ -395,6 +404,67 @@ export class UserHub extends Agent<Env, HubState> {
     })
   }
 
+  // ── Shared memory ───────────────────────────────────────────────────
+
+  /** Durable Object RPC: what every bot reads in its prompt. */
+  async sharedMemory(): Promise<string> {
+    return (
+      this.sql<{
+        content: string
+      }>`SELECT content FROM shared_memory ORDER BY id DESC LIMIT 1`[0]
+        ?.content ?? ""
+    )
+  }
+
+  /** Durable Object RPC: a bot saves a fact for all of the user's bots. */
+  async rememberShared(fact: string, botName: string) {
+    const result = appendFact(await this.sharedMemory(), fact)
+    if ("content" in result) this.saveShared(result.content, botName)
+    return "content" in result
+      ? { saved: true }
+      : "duplicate" in result
+        ? { saved: false, reason: "Already remembered." }
+        : { saved: false, error: result.error }
+  }
+
+  @callable()
+  async getSharedMemory() {
+    return {
+      content: await this.sharedMemory(),
+      revisions: this.sql<{
+        id: number
+        at: number
+        source: string
+      }>`SELECT id, at, source
+        FROM shared_memory ORDER BY id DESC LIMIT 20`,
+    }
+  }
+
+  @callable()
+  async setSharedMemory(content: string) {
+    if (content.length > MAX_MEMORY_CHARS) {
+      throw new Error(
+        `Shared memory is limited to ${MAX_MEMORY_CHARS} characters.`
+      )
+    }
+    if (content !== (await this.sharedMemory())) this.saveShared(content, "You")
+  }
+
+  @callable()
+  async restoreSharedMemory(revisionId: number) {
+    const row = this.sql<{
+      content: string
+    }>`SELECT content FROM shared_memory WHERE id = ${revisionId}`[0]
+    if (row) this.saveShared(row.content, "You (restored)")
+  }
+
+  private saveShared(content: string, source: string) {
+    this
+      .sql`INSERT INTO shared_memory (at, source, content) VALUES (${Date.now()}, ${source}, ${content})`
+    this
+      .sql`DELETE FROM shared_memory WHERE id <= (SELECT MAX(id) FROM shared_memory) - 50`
+  }
+
   async listBots(): Promise<BotSummary[]> {
     return this.state.bots
   }
@@ -439,9 +509,11 @@ export class UserHub extends Agent<Env, HubState> {
     }
     return {
       apps: this.state.connections.map((c) => ({
+        id: c.id,
         name: c.name,
         status: c.status,
         tools: c.tools,
+        ...(c.error ? { error: c.error } : {}),
       })),
       tools,
     }
@@ -456,13 +528,52 @@ export class UserHub extends Agent<Env, HubState> {
     if (!this.state.connections.some((c) => c.id === connectionId)) {
       throw new Error("That connection was removed.")
     }
-    const result = await this.mcp.callTool({
-      serverId: serverId(connectionId),
-      name,
-      arguments: args,
-    })
+    let result: unknown
+    try {
+      result = await this.mcp.callTool({
+        serverId: serverId(connectionId),
+        name,
+        arguments: args,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      const kind = classifyAppFailure(message)
+      this.noteAppCall(connectionId, {
+        at: Date.now(),
+        message: message.slice(0, 300),
+        kind,
+      })
+      const app =
+        this.state.connections.find((c) => c.id === connectionId)?.name ??
+        "This app"
+      throw new Error(
+        kind === "auth"
+          ? `${app} rejected the request because its sign-in expired or was revoked. Tell the user to reconnect ${app} in Connections. Do not retry until they have.`
+          : kind === "unreachable"
+            ? `${app} could not be reached (${message.slice(0, 120)}). It may be down. Tell the user if it matters; do not retry more than once.`
+            : message
+      )
+    }
+    this.noteAppCall(connectionId, null)
     // Structured clone over RPC: keep the plain JSON parts of the result.
     return JSON.parse(JSON.stringify(result)) as unknown
+  }
+
+  /** Remember the latest failed call per connection, for the Connections page. */
+  private noteAppCall(
+    connectionId: string,
+    failure: Connection["lastFailure"] | null
+  ) {
+    const current = this.state.connections.find((c) => c.id === connectionId)
+    if (!current || (!failure && !current.lastFailure)) return
+    this.setState({
+      ...this.state,
+      connections: this.state.connections.map((c) => {
+        if (c.id !== connectionId) return c
+        const { lastFailure: _, ...rest } = c
+        return failure ? { ...rest, lastFailure: failure } : rest
+      }),
+    })
   }
 
   /** Where the user opens bdots, so bots can hand out full app links. */
@@ -474,7 +585,8 @@ export class UserHub extends Agent<Env, HubState> {
   async relayMessage(
     fromBotId: string,
     to: string,
-    text: string
+    text: string,
+    delivery: { key?: string; hops?: number } = {}
   ): Promise<{ delivered: boolean; to?: string; error?: string }> {
     const from = this.state.bots.find((b) => b.id === fromBotId)
     const needle = to.trim().toLowerCase()
@@ -497,8 +609,28 @@ export class UserHub extends Agent<Env, HubState> {
     const bot = await this.bot(target.id)
     await bot.receiveBotMessage(
       { kind: "bot", name: from.name, avatar: from.avatar },
-      text
+      text,
+      delivery
     )
     return { delivered: true, to: target.name }
   }
+}
+
+/** Sorts a failed app call: an expired sign-in, a server that is down, or the tool itself. */
+function classifyAppFailure(message: string): "auth" | "unreachable" | "tool" {
+  if (
+    /\b(401|403)\b|unauthori[sz]ed|forbidden|invalid[_ ]token|token (has )?expired/i.test(
+      message
+    )
+  ) {
+    return "auth"
+  }
+  if (
+    /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|fetch failed|network|timed? ?out|\b(502|503|504)\b|not connected/i.test(
+      message
+    )
+  ) {
+    return "unreachable"
+  }
+  return "tool"
 }

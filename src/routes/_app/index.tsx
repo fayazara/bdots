@@ -60,7 +60,7 @@ function Onboarding() {
         style={{ "--i": 2 } as React.CSSProperties}
         variant="primary"
         size="lg"
-        className="btn-ink"
+        className="btn-ink rounded-full"
         icon={<PlusIcon />}
         onClick={createBot}
         loading={creating}

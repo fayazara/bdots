@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import { useHydrated } from "@tanstack/react-router"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -40,6 +40,18 @@ export type OnApproval = (
   reason?: string
 ) => void
 
+/** Hands a credential to the bot over its socket; it never enters the chat. */
+export type OnProvideSecret = (
+  toolCallId: string,
+  value: string
+) => Promise<void>
+
+/** Hands the tapped ask_user option to the bot before the card is approved. */
+export type OnAnswerChoice = (
+  toolCallId: string,
+  option: string
+) => Promise<void>
+
 interface ThreadProps {
   bot: Pick<BotState, "name" | "avatar" | "status">
   messages: UIMessage[]
@@ -51,6 +63,10 @@ interface ThreadProps {
   /** Loads screenshots and PDFs the bot saved. Absent before hydration. */
   readFile?: ReadFileData
   onApproval?: OnApproval
+  onProvideSecret?: OnProvideSecret
+  onAnswerChoice?: OnAnswerChoice
+  /** Id of the first message that was unread when the thread opened. */
+  unreadFrom?: string
 }
 
 /** Hostname of an absolute http(s) link, for its favicon. */
@@ -208,6 +224,146 @@ function ApprovalCard({
   )
 }
 
+/** ask_user: a question with tappable answers. Typing a reply also answers it. */
+function ChoiceCard({
+  call,
+  onApproval,
+  onAnswerChoice,
+}: {
+  call: ToolCall
+  onApproval?: OnApproval
+  onAnswerChoice?: OnAnswerChoice
+}) {
+  const [picking, setPicking] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const options = Array.isArray(call.input.options)
+    ? call.input.options.map(String)
+    : []
+  const ready = Boolean(onApproval && onAnswerChoice && call.approvalId)
+
+  async function pick(option: string) {
+    if (!onApproval || !onAnswerChoice || !call.approvalId) return
+    setPicking(option)
+    setError(null)
+    try {
+      await onAnswerChoice(call.id, option)
+      onApproval(call.approvalId, true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send that.")
+      setPicking(null)
+    }
+  }
+
+  return (
+    <div className="w-full max-w-[640px] rounded-3xl bg-kumo-tint p-4">
+      <p className="text-[15px] text-kumo-default">
+        {String(call.input.question ?? "")}
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {options.map((option) => (
+          <Button
+            key={option}
+            variant="outline"
+            className="rounded-full"
+            loading={picking === option}
+            disabled={!ready || picking !== null}
+            onClick={() => void pick(option)}
+          >
+            {option}
+          </Button>
+        ))}
+      </div>
+      {error ? <p className="mt-2 text-sm text-kumo-danger">{error}</p> : null}
+    </div>
+  )
+}
+
+/** request_secret: a masked field. The value goes to the bot, not the chat. */
+function SecretCard({
+  call,
+  onApproval,
+  onProvideSecret,
+}: {
+  call: ToolCall
+  onApproval?: OnApproval
+  onProvideSecret?: OnProvideSecret
+}) {
+  const [value, setValue] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const ready = Boolean(onApproval && onProvideSecret && call.approvalId)
+
+  async function save() {
+    if (!onApproval || !onProvideSecret || !call.approvalId) return
+    setSaving(true)
+    setError(null)
+    try {
+      await onProvideSecret(call.id, value)
+      setValue("")
+      onApproval(call.approvalId, true, "saved")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save it.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form
+      className="w-full max-w-[640px] rounded-3xl bg-kumo-tint p-4"
+      onSubmit={(e) => {
+        e.preventDefault()
+        void save()
+      }}
+    >
+      <p className="text-[15px] font-semibold text-kumo-default">
+        {String(call.input.name ?? "Credential")}
+      </p>
+      <p className="mt-1 text-[15px] text-kumo-default">
+        {String(call.input.purpose ?? "")}
+      </p>
+      <p className="mt-1 text-sm text-kumo-subtle">
+        Only sent to {String(call.input.origin ?? "")}. The bot never sees it.
+      </p>
+      <input
+        type="password"
+        autoComplete="off"
+        aria-label="Value"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        className="mt-3 h-10 w-full rounded-full bg-kumo-base px-4 text-[15px] text-kumo-default ring-1 ring-kumo-line outline-none focus-visible:ring-2 focus-visible:ring-kumo-focus"
+      />
+      {error ? <p className="mt-2 text-sm text-kumo-danger">{error}</p> : null}
+      <div className="mt-3 flex gap-2">
+        <Button
+          type="submit"
+          variant="primary"
+          className="btn-ink rounded-full"
+          loading={saving}
+          disabled={!ready || !value.trim()}
+        >
+          Save
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="rounded-full"
+          disabled={!ready}
+          onClick={() =>
+            onApproval?.(
+              call.approvalId!,
+              false,
+              "The user chose not to share it."
+            )
+          }
+        >
+          Not now
+        </Button>
+      </div>
+    </form>
+  )
+}
+
 function AssistantMessage({
   blocks,
   live,
@@ -218,6 +374,8 @@ function AssistantMessage({
   getLiveView,
   readFile,
   onApproval,
+  onProvideSecret,
+  onAnswerChoice,
 }: {
   blocks: Block[]
   /** This reply is still being written. */
@@ -229,6 +387,8 @@ function AssistantMessage({
   getLiveView?: GetLiveView
   readFile?: ReadFileData
   onApproval?: OnApproval
+  onProvideSecret?: OnProvideSecret
+  onAnswerChoice?: OnAnswerChoice
 }) {
   const { work, shown } = toTurn(blocks)
   return (
@@ -246,7 +406,7 @@ function AssistantMessage({
           )}
         />
       ) : null}
-      {shown.map((block) => {
+      {shown.map((block, index) => {
         switch (block.kind) {
           case "text":
             return (
@@ -274,6 +434,7 @@ function AssistantMessage({
                 key={block.key}
                 calls={block.calls}
                 latest={block.key === latestComputerKey}
+                carriedOn={index < shown.length - 1}
                 getLiveView={getLiveView}
                 onApproval={onApproval}
               />
@@ -294,6 +455,24 @@ function AssistantMessage({
                 key={block.key}
                 call={block.call}
                 onApproval={onApproval}
+              />
+            )
+          case "choice":
+            return (
+              <ChoiceCard
+                key={block.key}
+                call={block.call}
+                onApproval={onApproval}
+                onAnswerChoice={onAnswerChoice}
+              />
+            )
+          case "secret":
+            return (
+              <SecretCard
+                key={block.key}
+                call={block.call}
+                onApproval={onApproval}
+                onProvideSecret={onProvideSecret}
               />
             )
         }
@@ -406,6 +585,9 @@ export function Thread({
   getLiveView,
   readFile,
   onApproval,
+  onProvideSecret,
+  onAnswerChoice,
+  unreadFrom,
 }: ThreadProps) {
   const scroller = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
@@ -485,31 +667,47 @@ export function Thread({
     >
       <div className="mx-auto flex max-w-[820px] flex-col gap-5 px-6 pt-2 pb-8">
         {rendered.map(({ message, blocks, at, durationMs }, index) => (
-          <div
-            key={message.id}
-            className={`flex flex-col gap-3 ${isNew(message.id) ? "msg-enter" : ""}`}
-            data-from={message.role === "user" ? "user" : "bot"}
-          >
-            {/* Time zone and locale are the viewer's, so only after hydration. */}
-            {hydrated && at && startsNewMoment(at, rendered[index - 1]?.at) ? (
-              <TimeDivider at={at} />
+          <Fragment key={message.id}>
+            {message.id === unreadFrom ? (
+              <div
+                className="flex items-center gap-3 text-xs font-medium text-kumo-danger"
+                role="separator"
+                aria-label="New messages"
+              >
+                <span className="h-px flex-1 bg-kumo-danger/30" />
+                New
+                <span className="h-px flex-1 bg-kumo-danger/30" />
+              </div>
             ) : null}
-            {message.role === "user" ? (
-              <UserMessage message={message} />
-            ) : (
-              <AssistantMessage
-                blocks={blocks}
-                live={replying && index === rendered.length - 1}
-                startedAt={at}
-                durationMs={durationMs}
-                botId={botId}
-                latestComputerKey={latestComputerKey}
-                getLiveView={getLiveView}
-                readFile={readFile}
-                onApproval={onApproval}
-              />
-            )}
-          </div>
+            <div
+              className={`flex flex-col gap-3 ${isNew(message.id) ? "msg-enter" : ""}`}
+              data-from={message.role === "user" ? "user" : "bot"}
+            >
+              {/* Time zone and locale are the viewer's, so only after hydration. */}
+              {hydrated &&
+              at &&
+              startsNewMoment(at, rendered[index - 1]?.at) ? (
+                <TimeDivider at={at} />
+              ) : null}
+              {message.role === "user" ? (
+                <UserMessage message={message} />
+              ) : (
+                <AssistantMessage
+                  blocks={blocks}
+                  live={replying && index === rendered.length - 1}
+                  startedAt={at}
+                  durationMs={durationMs}
+                  botId={botId}
+                  latestComputerKey={latestComputerKey}
+                  getLiveView={getLiveView}
+                  readFile={readFile}
+                  onApproval={onApproval}
+                  onProvideSecret={onProvideSecret}
+                  onAnswerChoice={onAnswerChoice}
+                />
+              )}
+            </div>
+          </Fragment>
         ))}
         {busy && !showsProgress && !waitingOnUser ? (
           <div

@@ -211,7 +211,10 @@ function AddConnection() {
       </Group>
       <div className="flex items-center justify-end gap-3 px-1.5">
         {error ? (
-          <p role="alert" className="flex-1 text-xs text-pretty text-kumo-danger">
+          <p
+            role="alert"
+            className="flex-1 text-xs text-pretty text-kumo-danger"
+          >
             {error}
           </p>
         ) : null}
@@ -279,6 +282,19 @@ function ConnectionRow({ connection }: { connection: Connection }) {
           {connection.headerNames.length > 0
             ? ` · sends ${connection.headerNames.join(", ")}`
             : ""}
+          {connection.lastFailure ? (
+            <span
+              className="text-kumo-warning"
+              title={connection.lastFailure.message}
+            >
+              {" · "}
+              {connection.lastFailure.kind === "auth"
+                ? "Sign-in expired, reconnect it"
+                : connection.lastFailure.kind === "unreachable"
+                  ? "Last call could not reach it"
+                  : "Last call failed"}
+            </span>
+          ) : null}
         </>
       }
     >

@@ -140,7 +140,10 @@ function BotRow({ bot, active }: { bot: BotSummary; active: boolean }) {
           </span>
         </span>
         {bot.status === "thinking" || bot.status === "working" ? (
-          <ShimmerText text="Typing…" className="block truncate text-sm" />
+          <ShimmerText
+            text={bot.status === "working" ? "Working…" : "Thinking…"}
+            className="block truncate text-sm"
+          />
         ) : (
           <span
             className={`block truncate text-sm ${

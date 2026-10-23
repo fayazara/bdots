@@ -29,6 +29,20 @@ interface HubContextValue {
   refreshConnections: () => void
   reconnect: (connectionId: string) => Promise<void>
   push: PushApi | null
+  /** Memory all bots read. Null until the hub WebSocket is up. */
+  sharedMemory: SharedMemoryApi | null
+}
+
+export interface MemoryRevision {
+  id: number
+  at: number
+  source: string
+}
+
+export interface SharedMemoryApi {
+  get: () => Promise<{ content: string; revisions: MemoryRevision[] }>
+  set: (content: string) => Promise<void>
+  restore: (revisionId: number) => Promise<void>
 }
 
 /** Web Push via the UserHub. Null until the hub WebSocket is up. */
@@ -77,6 +91,7 @@ export function StaticHubProvider({
       refreshConnections: () => {},
       reconnect: notConnected,
       push: null,
+      sharedMemory: null,
     }),
     [viewer, initial]
   )
@@ -112,6 +127,14 @@ export function LiveHubProvider({ viewer, initial, children }: ProviderProps) {
               unsubscribe: (endpoint) => agent.stub.unsubscribePush(endpoint),
               isSubscribed: (endpoint) => agent.stub.isPushSubscribed(endpoint),
               test: () => agent.stub.testPush(),
+            }
+          : null,
+      sharedMemory:
+        agent.state !== undefined
+          ? {
+              get: () => agent.stub.getSharedMemory(),
+              set: (content) => agent.stub.setSharedMemory(content),
+              restore: (id) => agent.stub.restoreSharedMemory(id),
             }
           : null,
     }),
